@@ -56,7 +56,7 @@ KNOWN_EXTENSIONS = {EXT_TTL, EXT_DIGEST_ONLY}
 
 STATE = configured_state()
 KEYS = KeyManager(STATE)
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 STORAGE_ERRORS = (sqlite3.Error, psycopg.Error)
 if os.environ.get("JEP_DEPLOYMENT_MODE") == "production" and not os.environ.get("JEP_SIGNING_TOKEN_FILE"):
     raise ValueError("Production signing requires JEP_SIGNING_TOKEN_FILE")
@@ -235,13 +235,18 @@ async def reject_ambiguous_json(request: Request, call_next):
 
 @app.get("/")
 def root() -> Dict[str, Any]:
+    try:
+        kid, _ = KEYS.snapshot()
+        current_key = STATE.public_keys()[kid]
+    except (KeyUnavailable, *STORAGE_ERRORS):
+        raise HTTPException(status_code=503, detail="Signing or shared state unavailable")
     return {
         "name": "JEP v0.6 API Seed",
         "profile": JEP_CORE_PROFILE,
         "wire_format": JEP_WIRE_VERSION,
         "version": VERSION,
         "revision": os.environ.get("JEP_REVISION", "development"),
-        "public_key": next((k for k in KEYS.jwks()["keys"] if k["kid"] == KEYS.snapshot()[0]), None),
+        "public_key": current_key,
         "jwks_uri": "/.well-known/jwks.json",
         "endpoints": ["/health", "/events/create", "/events/verify"],
     }
