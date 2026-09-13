@@ -72,3 +72,88 @@ class LocalState:
                 "INSERT OR IGNORE INTO events VALUES (?, ?)",
                 (event_hash, json.dumps(event, ensure_ascii=False)),
             )
+
+    def register_public_key(self, kid: str, jwk: dict) -> None:
+        payload = json.dumps(jwk, sort_keys=True)
+        with self.connect() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS public_keys (kid TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+            db.execute("INSERT OR IGNORE INTO public_keys VALUES (?, ?)", (kid, payload))
+            existing = db.execute("SELECT payload FROM public_keys WHERE kid = ?", (kid,)).fetchone()[0]
+            if existing != payload:
+                raise ValueError("A kid cannot be reassigned to different key material")
+
+    def public_keys(self) -> dict:
+        with self.connect() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS public_keys (kid TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+            return {kid: json.loads(payload) for kid, payload in db.execute("SELECT kid, payload FROM public_keys")}
+
+    def health(self) -> None:
+        with self.connect() as db:
+            db.execute("SELECT 1").fetchone()
+
+
+class PostgresState:
+    """Transactional state shared across hosts. Private keys never enter this database."""
+    def __init__(self, dsn: str):
+        import psycopg
+        self.dsn = dsn
+        self.driver = psycopg
+        with self.connect() as db:
+            # Serialize bootstrap across simultaneous worker starts.
+            db.execute("SELECT pg_advisory_xact_lock(7060601)")
+            db.execute("CREATE TABLE IF NOT EXISTS jep_nonces (actor TEXT NOT NULL, audience TEXT NOT NULL, nonce TEXT NOT NULL, expires BIGINT NOT NULL, PRIMARY KEY(actor,audience,nonce))")
+            db.execute("CREATE TABLE IF NOT EXISTS jep_events (hash TEXT PRIMARY KEY, payload JSONB NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS jep_public_keys (kid TEXT PRIMARY KEY, payload JSONB NOT NULL)")
+            db.execute("CREATE INDEX IF NOT EXISTS jep_nonces_expiry ON jep_nonces(expires)")
+
+    @contextmanager
+    def connect(self):
+        with self.driver.connect(self.dsn, connect_timeout=10, options="-c statement_timeout=10000 -c lock_timeout=10000") as db:
+            yield db
+
+    def consume_nonce(self, actor: str, audience: str, nonce: str, *, now: int, expires: int) -> bool:
+        with self.connect() as db:
+            row = db.execute("INSERT INTO jep_nonces VALUES (%s,%s,%s,%s) ON CONFLICT(actor,audience,nonce) DO UPDATE SET expires=EXCLUDED.expires WHERE jep_nonces.expires < %s RETURNING nonce", (actor,audience,nonce,expires,now)).fetchone()
+            return row is not None
+
+    def save_event(self, event_hash: str, event: dict) -> None:
+        with self.connect() as db:
+            db.execute("INSERT INTO jep_events VALUES (%s,%s::jsonb) ON CONFLICT DO NOTHING", (event_hash,json.dumps(event,ensure_ascii=False)))
+
+    def register_public_key(self, kid: str, jwk: dict) -> None:
+        with self.connect() as db:
+            db.execute("INSERT INTO jep_public_keys VALUES (%s,%s::jsonb) ON CONFLICT DO NOTHING", (kid,json.dumps(jwk)))
+            existing = db.execute("SELECT payload FROM jep_public_keys WHERE kid=%s", (kid,)).fetchone()[0]
+            if existing != jwk:
+                raise ValueError("A kid cannot be reassigned to different key material")
+
+    def public_keys(self) -> dict:
+        with self.connect() as db:
+            return dict(db.execute("SELECT kid,payload FROM jep_public_keys").fetchall())
+
+    def health(self) -> None:
+        with self.connect() as db:
+            db.execute("SELECT 1").fetchone()
+
+    def prune_nonces(self, before: int) -> int:
+        # Operators may call this with the present time, never a future cutoff.
+        import time
+        if before > int(time.time()):
+            raise ValueError("Cannot prune future replay records")
+        with self.connect() as db:
+            return db.execute("DELETE FROM jep_nonces WHERE expires < %s", (before,)).rowcount
+
+
+def configured_state():
+    import os
+    url = os.environ.get("JEP_DATABASE_URL")
+    path = os.environ.get("JEP_DATABASE_URL_FILE")
+    if url and path:
+        raise ValueError("Set either JEP_DATABASE_URL or JEP_DATABASE_URL_FILE")
+    if path:
+        url = Path(path).read_text().strip()
+    if url:
+        return PostgresState(url)
+    if os.environ.get("JEP_DEPLOYMENT_MODE") == "production":
+        raise ValueError("Production mode requires PostgreSQL shared state")
+    return LocalState(os.environ.get("JEP_STATE_DIR", ".jep-state"))

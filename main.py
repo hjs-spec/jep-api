@@ -31,7 +31,11 @@ import time
 import uuid
 from copy import deepcopy
 from pathlib import Path
-from state import LocalState
+from state import configured_state
+from keys import KeyManager, KeyUnavailable
+from nacl.signing import VerifyKey
+import psycopg
+import secrets
 from typing import Any, Dict, List, Optional, Literal
 
 import rfc8785
@@ -50,7 +54,12 @@ EXT_TTL = "https://jep.org/ttl"
 EXT_DIGEST_ONLY = "https://jep.org/priv/digest-only"
 KNOWN_EXTENSIONS = {EXT_TTL, EXT_DIGEST_ONLY}
 
-STATE = LocalState(os.environ.get("JEP_STATE_DIR", ".jep-state"))
+STATE = configured_state()
+KEYS = KeyManager(STATE)
+VERSION = "0.7.0"
+STORAGE_ERRORS = (sqlite3.Error, psycopg.Error)
+if os.environ.get("JEP_DEPLOYMENT_MODE") == "production" and not os.environ.get("JEP_SIGNING_TOKEN_FILE"):
+    raise ValueError("Production signing requires JEP_SIGNING_TOKEN_FILE")
 MAX_AGE_SECONDS = 300
 CLOCK_SKEW_SECONDS = 30
 SCHEMA = Draft202012Validator(
@@ -58,9 +67,6 @@ SCHEMA = Draft202012Validator(
     format_checker=FormatChecker(),
 )
 
-# Local durable key; external key management remains deployment-specific.
-SIGNING_KEY = STATE.signing_key()
-VERIFY_KEY = SIGNING_KEY.public_key()
 DEMO_KID = "did:example:jep-api#key-1"
 DEMO_WHO = "did:example:jep-api"
 
@@ -103,16 +109,17 @@ def event_hash(event: Dict[str, Any]) -> str:
 
 
 def detached_jws_sign(unsigned_event: Dict[str, Any]) -> str:
+    kid, sign = KEYS.snapshot()
     protected = {
         "alg": "Ed25519",
-        "kid": DEMO_KID,
+        "kid": kid,
         "typ": "jep-event+jws",
         "jep": JEP_WIRE_VERSION,
     }
     protected_b64 = b64u(jcs_seed(protected))
     payload_b64 = b64u(jcs_seed(unsigned_event))
     signing_input = f"{protected_b64}.{payload_b64}".encode("ascii")
-    signature = SIGNING_KEY.sign(signing_input)
+    signature = sign(signing_input)
     return f"{protected_b64}..{b64u(signature)}"
 
 
@@ -126,7 +133,7 @@ def detached_jws_verify(event: Dict[str, Any]) -> tuple[bool, Optional[Dict[str,
         return False, error("ERR_SIGNATURE_CONTAINER_INVALID", "JWS payload segment must be empty", 1)
 
     try:
-        protected = json.loads(b64u_decode(protected_b64), object_pairs_hook=strict_object, parse_constant=reject_constant)
+        protected = json.loads(b64u_decode(protected_b64).decode("utf-8"), object_pairs_hook=strict_object, parse_constant=reject_constant)
     except Exception as exc:
         return False, error("ERR_SIGNATURE_CONTAINER_INVALID", f"Invalid protected header: {exc}", 1)
 
@@ -135,14 +142,18 @@ def detached_jws_verify(event: Dict[str, Any]) -> tuple[bool, Optional[Dict[str,
     if protected.get("alg") != "Ed25519":
         return False, error("ERR_UNSUPPORTED_SIGNATURE_ALG", f"Unsupported alg: {protected.get('alg')}", 1)
 
-    if protected.get("kid") != DEMO_KID:
+    try:
+        jwk = STATE.public_keys().get(protected.get("kid"))
+    except STORAGE_ERRORS:
+        return False, error("ERR_KEY_UNRESOLVED", "Key registry unavailable", 1)
+    if jwk is None:
         return False, error("ERR_KEY_UNRESOLVED", "Unknown signing key identifier", 1)
     unsigned = {k: v for k, v in event.items() if k != "sig"}
     payload_b64 = b64u(jcs_seed(unsigned))
     signing_input = f"{protected_b64}.{payload_b64}".encode("ascii")
 
     try:
-        VERIFY_KEY.verify(b64u_decode(signature_b64), signing_input)
+        VerifyKey(b64u_decode(jwk["x"])).verify(signing_input, b64u_decode(signature_b64))
         return True, None
     except Exception as exc:
         return False, error("ERR_SIGNATURE_INVALID", str(exc), 1)
@@ -200,14 +211,21 @@ class EventResponse(BaseModel):
 
 app = FastAPI(
     title="JEP v0.6 API Seed",
-    version="0.6.0",
+    version=VERSION,
     description="FastAPI seed for JEP v0.6 event creation and verification.",
 )
 
 
 @app.middleware("http")
 async def reject_ambiguous_json(request: Request, call_next):
-    if request.method == "POST" and request.url.path in {"/events/create", "/events/verify"}:
+    if request.method == "POST" and request.url.path == "/events/create" and os.environ.get("JEP_SIGNING_TOKEN_FILE"):
+        try:
+            token = Path(os.environ["JEP_SIGNING_TOKEN_FILE"]).read_text().strip()
+            if not token or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + token):
+                return JSONResponse(status_code=401, content={"detail": "Signing authentication required"})
+        except OSError:
+            return JSONResponse(status_code=503, content={"detail": "Signing authentication unavailable"})
+    if request.method == "POST" and request.url.path in {"/events/create", "/events/verify", "/events/verify-legacy"}:
         try:
             json.loads((await request.body()).decode("utf-8"), object_pairs_hook=strict_object, parse_constant=reject_constant)
         except (ValueError, UnicodeError) as exc:
@@ -221,19 +239,32 @@ def root() -> Dict[str, Any]:
         "name": "JEP v0.6 API Seed",
         "profile": JEP_CORE_PROFILE,
         "wire_format": JEP_WIRE_VERSION,
-        "public_key": {
-            "kty": "OKP",
-            "crv": "Ed25519",
-            "kid": DEMO_KID,
-            "x": b64u(VERIFY_KEY.public_bytes_raw()),
-        },
+        "version": VERSION,
+        "revision": os.environ.get("JEP_REVISION", "development"),
+        "public_key": next((k for k in KEYS.jwks()["keys"] if k["kid"] == KEYS.snapshot()[0]), None),
+        "jwks_uri": "/.well-known/jwks.json",
         "endpoints": ["/health", "/events/create", "/events/verify"],
     }
 
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    return {"ok": True, "profile": JEP_CORE_PROFILE}
+    try:
+        STATE.health()
+        KEYS.snapshot()
+    except (KeyUnavailable, *STORAGE_ERRORS):
+        raise HTTPException(status_code=503, detail="Signing or shared state unavailable")
+    return {"ok": True, "profile": JEP_CORE_PROFILE, "version": VERSION, "revision": os.environ.get("JEP_REVISION", "development")}
+
+
+@app.get("/.well-known/jwks.json")
+def jwks():
+    return KEYS.jwks()
+
+
+@app.get("/live")
+def live():
+    return {"ok": True, "version": VERSION}
 
 
 @app.post("/events/create", response_model=EventResponse)
@@ -279,6 +310,8 @@ def create_event(req: CreateEventRequest) -> Dict[str, Any]:
 
     try:
         event["sig"] = detached_jws_sign(event)
+    except KeyUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Signing provider unavailable") from exc
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -288,7 +321,7 @@ def create_event(req: CreateEventRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=422, detail=result)
     try:
         STATE.save_event(h, event)
-    except sqlite3.Error as exc:
+    except STORAGE_ERRORS as exc:
         raise HTTPException(status_code=503, detail="Event storage is unavailable") from exc
     return {"event": event, "event_hash": h, "validation": result}
 
@@ -353,7 +386,7 @@ def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce:
         try:
             consumed = STATE.consume_nonce(event["who"], event.get("aud", ""), event["nonce"],
                 now=now, expires=max(now, event["when"]) + MAX_AGE_SECONDS + CLOCK_SKEW_SECONDS)
-        except sqlite3.Error:
+        except STORAGE_ERRORS:
             return fail("ERR_DOMAIN_REQUIREMENT_UNSATISFIED", "Replay storage is unavailable", 1, scopes)
         if not consumed:
             return fail("ERR_NONCE_REPLAY", "Nonce already consumed in this actor/audience domain", 1, scopes)
@@ -362,3 +395,14 @@ def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce:
     if mode == "archival":
         warnings.append({"code": "ACCEPTANCE_NOT_CHECKED", "message": "Historical integrity only; freshness and live authorization were not checked."})
     return validation_result(True, 1, mode, event=event, scopes=scopes, warnings=warnings)
+
+
+class LegacyVerifyRequest(BaseModel):
+    event: Dict[str, Any]
+    format: Literal["json-sorted-v1", "hf-space-v06"]
+
+
+@app.post("/events/verify-legacy")
+def verify_legacy(req: LegacyVerifyRequest):
+    from compatibility import verify_legacy_event
+    return verify_legacy_event(req.event, req.format, STATE.public_keys())
