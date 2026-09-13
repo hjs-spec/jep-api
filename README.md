@@ -1,6 +1,6 @@
-# JEP v0.6 API Seed
+# JEP API 0.7 (JEP-Core-0.6)
 
-A small FastAPI implementation seed for the Judgment Event Protocol v0.6.
+FastAPI event creation and verification for JEP-Core-0.6, with PostgreSQL multi-host state, external Ed25519 signing providers and explicit historical-format verification.
 
 This repository upgrades the earlier JEP-04 API demo into a JEP v0.6-style API seed aligned with:
 
@@ -107,3 +107,9 @@ A valid signature proves protocol-level integrity under the API seed's demo trus
 ## Runtime and verification notes
 
 See [HARDENING.md](HARDENING.md) for supported behavior, regression checks, and compatibility boundaries.
+
+## Production configuration and migration
+
+The current release is [0.7.2](https://github.com/hjs-spec/jep-api/releases/tag/v0.7.2). See [DEPLOYMENT.md](DEPLOYMENT.md) for PostgreSQL, keyring/Vault configuration, authenticated signing, rotation, SQLite migration and the existing Hugging Face target. Container: `ghcr.io/hjs-spec/jep-api:0.7.2`. Publishing this image does not update an existing service automatically.
+
+Additional endpoints: `GET /.well-known/jwks.json`, `GET /live`, and archival-only `POST /events/verify-legacy`. Production creation requires Bearer authentication; the SDKs/CLI accept their existing API-key options, and GitHub Action 0.6.2 accepts `jep_api_token`.

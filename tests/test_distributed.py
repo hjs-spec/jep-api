@@ -69,7 +69,7 @@ def test_postgres_independent_apis(tmp_path):
             request={"verb":"J","who":"a","what":{"claim":"test"},"aud":"test"};headers={"Authorization":"Bearer test-only-bearer"}
             assert client.post(urls[0]+"/events/create",json=request).status_code==401
             created=client.post(urls[0]+"/events/create",json=request,headers=headers);assert created.status_code==200,created.text;event=created.json()["event"]
-            def consume(i):return client.post(urls[i%2]+"/events/verify",json={"event":event,"mode":"acceptance","expected_audience":"test"}).json()
+            def consume(i):return client.post(urls[i%2]+"/events/verify",json={"event":event,"mode":"acceptance","expected_audience":"test"},headers=headers).json()
             with ThreadPoolExecutor(8) as pool:results=list(pool.map(consume,range(16)))
             assert sum(r["valid"] for r in results)==1,results
             keyring(paths[0],"key-2");paths[1].write_text(paths[0].read_text());paths[1].chmod(0o600)
@@ -92,3 +92,18 @@ def test_metadata_observes_rotation_in_one_request(tmp_path,monkeypatch):
     monkeypatch.setattr(main,"STATE",state);monkeypatch.setattr(main,"KEYS",manager)
     keyring(path,"key-2")
     assert main.root()["public_key"]["kid"]=="key-2"
+
+
+def test_unauthenticated_consumption_does_not_poison_nonce(tmp_path,monkeypatch):
+    import main
+    from fastapi.testclient import TestClient
+    path=tmp_path/"token";path.write_text("receiver-token")
+    monkeypatch.setenv("JEP_SIGNING_TOKEN_FILE",str(path))
+    client=TestClient(main.app)
+    headers={"Authorization":"Bearer receiver-token"}
+    event=client.post("/events/create",headers=headers,json={"verb":"J","who":"a","what":{"claim":"test"},"aud":"receiver"}).json()["event"]
+    payload={"event":event,"mode":"acceptance","expected_audience":"receiver"}
+    assert client.post("/events/verify",json=payload).status_code==401
+    assert client.post("/events/verify",json={"event":event,"consume_nonce":"true"}).status_code==401
+    assert client.post("/events/verify",json=payload,headers=headers).json()["valid"]
+    assert not client.post("/events/verify",json=payload,headers=headers).json()["valid"]

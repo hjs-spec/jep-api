@@ -1,3 +1,3 @@
-# Release 0.7.1
+# Release 0.7.2
 
-Includes PostgreSQL shared state, external keyring/Vault signing, retained key history and explicit legacy verification from 0.7.0. Metadata now uses one signing-key snapshot during rotation, so its current public key is never omitted. Deployment verifies the release version from VERSION. See DEPLOYMENT.md.
+Includes PostgreSQL shared state, external keyring/Vault signing, retained key history and explicit legacy verification. State-changing verification now requires the configured API Bearer token, preventing anonymous nonce consumption. Read-only archival verification remains public. Metadata uses one key snapshot during rotation. See DEPLOYMENT.md.
