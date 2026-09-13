@@ -1,58 +1,41 @@
 # JEP-Core-0.6 Reference API
 
-FastAPI event creation and verification for JEP-Core-0.6, with PostgreSQL multi-host state, external Ed25519 signing providers and explicit historical-format verification.
+FastAPI implementation for creating and verifying signed J/D/T/V events using RFC 8785 JCS, algorithm-tagged event hashes, and Ed25519 detached JWS.
 
-Protocol profile: `jep-core-0.6`; wire version: `"1"`. The implementation release `0.7.3` is a separate software version, not a JEP 0.7 protocol revision.
+Protocol profile: `jep-core-0.6`; wire version: `"1"`. The [0.7.3 implementation release](https://github.com/hjs-spec/jep-api/releases/tag/v0.7.3) is versioned separately from the protocol. Live deployment and external database provisioning remain deferred; repository changes do not update hosted services.
 
-Current delivery scope is the updated repository implementation. Live deployment and external database provisioning are deferred. Both Hugging Face configuration checks and deployment are manual workflows; merging code or publishing an implementation release does not update the live Space.
+## Run locally
 
-This repository upgrades the earlier JEP-04 API demo into a JEP v0.6-style API seed aligned with:
+With Python 3.10 or newer:
 
-- `draft-wang-jep-judgment-event-protocol-06`
-- `draft-wang-jep-profiles-00`
-- `draft-wang-jep-conformance-00`
+```bash
+git clone https://github.com/hjs-spec/jep-api.git
+cd jep-api
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m uvicorn main:app --host 127.0.0.1 --port 8000
+```
 
-## Status
-
-This is an implementation seed, not a production security service.
-
-It demonstrates:
-
-- J/D/T/V event creation
-- JEP wire version `"1"`
-- JEP-Core-0.6 profile labels
-- JCS-compatible seed canonicalization
-- algorithm-tagged event hashes
-- detached JWS Compact Serialization shape
-- Ed25519 signing and verification
-- `ext` / `ext_crit` extension framework
-- TTL and digest-only privacy extensions
-- JEP-style validation result object
-- separated event storage and nonce consumption
+Open [interactive API documentation](http://127.0.0.1:8000/docs). The default local configuration persists keys, events, and replay state in `.jep-state`; keep that directory to verify earlier events after restarting. For an application example, see the [local quickstart](https://github.com/hjs-spec/jep-quickstart).
 
 ## Endpoints
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /` | API metadata and demo public key |
-| `GET /health` | Health check |
-| `POST /events/create` | Create and sign a JEP-style event |
-| `POST /events/verify` | Verify a JEP-style event |
+| `GET /` | API metadata and current signing public key |
+| `GET /.well-known/jwks.json` | Trusted public keys in JWKS format |
+| `GET /live` | Process liveness |
+| `GET /health` | State and signing-configuration health |
+| `POST /events/create` | Create, sign, and store a Core-0.6 event |
+| `POST /events/verify` | Verify in archival or acceptance mode |
+| `POST /events/verify-legacy` | Explicit historical-format integrity verification |
 
-## Run locally
+Production signing and nonce-consuming requests require Bearer authentication. The SDKs/CLI accept API-key options; GitHub Action 0.6.2 uses `jep_api_token`. See [deployment and migration](DEPLOYMENT.md) for PostgreSQL shared state, keyring/Vault signing, key rotation, and compatibility formats. The versioned container is `ghcr.io/hjs-spec/jep-api:0.7.3`.
 
-```bash
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
+## Create an event
 
-Open:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-## Example create request
+Submit this body to `POST /events/create`:
 
 ```json
 {
@@ -68,7 +51,11 @@ http://127.0.0.1:8000/docs
 }
 ```
 
-## Validation result shape
+The response contains `event`, `event_hash`, and `validation`. To verify it, send the returned event unchanged as `{"event": <returned event>, "mode": "archival"}` to `POST /events/verify`.
+
+## Validation results
+
+A successful archival response has this shape; `event_hash` below is an illustrative digest:
 
 ```json
 {
@@ -76,46 +63,33 @@ http://127.0.0.1:8000/docs
   "level": 1,
   "mode": "archival",
   "profile": "jep-core-0.6",
+  "conformance_class": "JEP-Baseline-Ed25519-JWS-JCS-0.6",
   "scopes": ["syntax", "cryptographic"],
-  "event_hash": "sha256:...",
-  "warnings": [],
+  "event_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "warnings": [
+    {
+      "code": "ACCEPTANCE_NOT_CHECKED",
+      "message": "Historical integrity only; freshness and live authorization were not checked.",
+      "level": 1,
+      "recoverable": false
+    }
+  ],
   "errors": []
 }
 ```
 
-## Boundary
+Responses follow the [validation result schema](jep-validation-result.schema.json). Diagnostics include `code`, `message`, `level`, and `recoverable`. Core diagnostic codes such as `ERR_MISSING_REQUIRED_FIELD` and `ERR_INVALID_TIMESTAMP` replace the former generic `ERR_SCHEMA_INVALID`. Malformed JSON at `/events/verify` returns HTTP 400 with a structured result and mode `unparsed`. Legacy results use `legacy-integrity-only` and do not assert Core-0.6 conformance.
 
-This API does not determine:
+Archival mode checks historical integrity without applying live freshness or TTL rejection. Acceptance additionally requires `expected_audience`, checks freshness and TTL, and consumes the nonce atomically. Explicit `consume_nonce` also consumes state in archival mode. These checks do not establish actor identity or authority.
 
-- external truth;
-- legal liability;
-- regulatory compliance;
-- authorization validity;
-- complete-log availability;
-- model correctness.
+## Verification scope
 
-A valid signature proves protocol-level integrity under the API seed's demo trust context.
+The API reports Level 1 structure and cryptographic checks under its configured trusted keys. It implements TTL and digest-only extensions; unknown critical extensions are rejected. It does not determine external truth, legal liability, regulatory compliance, authorization validity, complete logging, or model correctness.
 
-## Public drafts
+See [hardening notes](HARDENING.md) for regression coverage and historical changes, and [deployment and migration](DEPLOYMENT.md) for operational requirements. This reference implementation requires deployment-specific trust and security configuration before production use.
 
-- JEP-Core: https://datatracker.ietf.org/doc/draft-wang-jep-judgment-event-protocol/
-- JEP-Profiles: https://datatracker.ietf.org/doc/draft-wang-jep-profiles/
-- JEP-Conformance: https://datatracker.ietf.org/doc/draft-wang-jep-conformance/
+## Protocol and related resources
 
-## Related resources
-
-- JEP v0.6 Repository: https://github.com/hjs-spec/jep-v06
-- JEP v0.6 Spec Demo: https://huggingface.co/spaces/yuqiangJEP/jep-v06-spec-demo/tree/main
-- JEP v0.6 Conformance Suite: https://huggingface.co/datasets/yuqiangJEP/jep-v06-conformance-suite
-
-## Runtime and verification notes
-
-See [HARDENING.md](HARDENING.md) for supported behavior, regression checks, and compatibility boundaries.
-
-## Production configuration and migration
-
-The current release is [0.7.3](https://github.com/hjs-spec/jep-api/releases/tag/v0.7.3). See [DEPLOYMENT.md](DEPLOYMENT.md) for PostgreSQL, keyring/Vault configuration, authenticated signing, rotation, SQLite migration and the existing Hugging Face target. Container: `ghcr.io/hjs-spec/jep-api:0.7.3`. Publishing this image does not update an existing service automatically.
-
-Additional endpoints: `GET /.well-known/jwks.json`, `GET /live`, and archival-only `POST /events/verify-legacy`. Production creation requires Bearer authentication; the SDKs/CLI accept their existing API-key options, and GitHub Action 0.6.2 accepts `jep_api_token`.
-
-Validation responses include `conformance_class`, and every warning/error includes `code`, `message`, `level`, and `recoverable`. Current responses follow [the validation result schema](jep-validation-result.schema.json). Schema failures use the core diagnostic codes (for example `ERR_MISSING_REQUIRED_FIELD` and `ERR_INVALID_TIMESTAMP`) instead of the former generic `ERR_SCHEMA_INVALID`. Malformed JSON at `/events/verify` retains HTTP 400 and includes a structured result with mode `unparsed`. Legacy verification is explicitly labeled `legacy-integrity-only`.
+- [Core specification, validators, and test vectors](https://github.com/hjs-spec/jep-v06)
+- Public drafts: [Core](https://datatracker.ietf.org/doc/draft-wang-jep-judgment-event-protocol/) · [Profiles](https://datatracker.ietf.org/doc/draft-wang-jep-profiles/) · [Conformance](https://datatracker.ietf.org/doc/draft-wang-jep-conformance/)
+- [Project and resource index](https://github.com/hjs-spec/.github/blob/main/PROJECTS.md)
