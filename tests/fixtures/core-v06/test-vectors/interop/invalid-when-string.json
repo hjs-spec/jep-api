@@ -1,0 +1,13 @@
+{
+  "jep": "1",
+  "verb": "J",
+  "who": "urn:audit:actor",
+  "when": "yesterday",
+  "what": {
+    "claim": "approve"
+  },
+  "nonce": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "aud": "urn:audit:audience",
+  "ref": null,
+  "sig": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoiYXVkaXQtdGVzdC1rZXkifQ..MHPPztKzAHRhQgxcqnGb32hWhDSvvoZoT1qdt334HEuP51nEnLyn1tYY6r9i46f9O9KkXzZpBD9sEyIjAMXzAA"
+}

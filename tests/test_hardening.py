@@ -40,11 +40,11 @@ def test_expired_archive_is_valid_but_cannot_be_accepted():
     assert not main.validate_event(event, mode="acceptance", expected_audience=event["aud"])["valid"]
 
 
-@pytest.mark.parametrize("changes", [{"who": None}, {"when": True}, {"nonce": ""}, {"verb": "D"}, {"unexpected": 1}])
-def test_signed_invalid_structure_rejected(changes):
+@pytest.mark.parametrize("changes,code", [({"who": None}, "ERR_INVALID_FIELD_TYPE"), ({"when": True}, "ERR_INVALID_TIMESTAMP"), ({"nonce": ""}, "ERR_INVALID_FIELD_TYPE"), ({"verb": "D"}, "ERR_MISSING_REQUIRED_FIELD"), ({"unexpected": 1}, "ERR_INVALID_FIELD_TYPE")])
+def test_signed_invalid_structure_rejected(changes, code):
     result = main.validate_event(signed(**changes))
     assert result["valid"] is False
-    assert result["errors"][0]["code"] == "ERR_SCHEMA_INVALID"
+    assert result["errors"][0]["code"] == code
 
 
 def test_malformed_header_is_a_validation_error_not_http_500():

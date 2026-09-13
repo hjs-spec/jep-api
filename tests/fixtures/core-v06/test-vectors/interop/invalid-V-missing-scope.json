@@ -1,0 +1,13 @@
+{
+  "jep": "1",
+  "verb": "V",
+  "who": "urn:audit:actor",
+  "when": 1788397200,
+  "what": {
+    "claim": "verified"
+  },
+  "nonce": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "aud": "urn:audit:audience",
+  "ref": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "sig": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoiYXVkaXQtdGVzdC1rZXkifQ..CmLopxgzyorY6ExqlHtV-IuPdGtqqNEjfg7sPQXuq-lFYbAYcMsxFFpc76FRc5U6THbt5RjOV0GclN5Bb3uRBg"
+}

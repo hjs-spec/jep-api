@@ -1,0 +1,1 @@
+Public event fixtures copied verbatim from hjs-spec/jep-v06 commit d264754dca2e472f7c215266eb43e8e9ad0eb160. test-manifest.json retains the 26 event cases; the chain case is outside this API’s Level 1 scope. Keys are public test keys. The result schema is copied from the same commit.

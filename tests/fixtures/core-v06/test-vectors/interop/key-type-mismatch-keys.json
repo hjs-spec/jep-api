@@ -1,0 +1,8 @@
+{
+  "audit-test-key": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "tjmwBhsoWBH5iF0Bbv-dTUdUBfX1BLPJ4GM8WVftfYQ",
+    "kid": "audit-test-key"
+  }
+}

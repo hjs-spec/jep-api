@@ -1,0 +1,8 @@
+{
+  "audit-test-key": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "kid": "audit-test-key"
+  }
+}

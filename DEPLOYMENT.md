@@ -2,7 +2,7 @@
 
 Wire version remains `1` / JEP-Core-0.6. No business semantics were added.
 
-Live deployment is currently deferred by the owner; the current scope is updating the repository implementation. The implementation version `0.7.2` is independent of the JEP-Core-0.6 protocol profile. The instructions below are for a future deployment. `check-hf.yml` and `deploy.yml` run only when manually dispatched on `main`; code changes and releases do not trigger them.
+Live deployment is currently deferred by the owner; the current scope is updating the repository implementation. The implementation version `0.7.3` is independent of the JEP-Core-0.6 protocol profile. The instructions below are for a future deployment. `check-hf.yml` and `deploy.yml` run only when manually dispatched on `main`; code changes and releases do not trigger them.
 
 ## Multiple hosts
 

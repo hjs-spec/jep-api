@@ -1,0 +1,19 @@
+{
+  "jep": "1",
+  "verb": "J",
+  "who": "urn:audit:actor",
+  "when": 1788397200,
+  "what": {
+    "claim": "approve"
+  },
+  "nonce": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "aud": "urn:audit:audience",
+  "ref": null,
+  "ext": {
+    "urn:audit:unknown": {}
+  },
+  "ext_crit": [
+    "urn:audit:unknown"
+  ],
+  "sig": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoiYXVkaXQtdGVzdC1rZXkifQ..FTfBmlc3bmmJZmGwedxLnSpXyaJAqAZ-rdjkgW3QG2OtQqSzmBY_XVOLTqicgkNAh71dRchcShL2K138ZZWRDQ"
+}

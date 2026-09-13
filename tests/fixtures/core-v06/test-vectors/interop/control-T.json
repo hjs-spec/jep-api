@@ -1,0 +1,15 @@
+{
+  "jep": "1",
+  "verb": "T",
+  "who": "urn:audit:actor",
+  "when": 1788397200,
+  "what": {
+    "claim": "terminate",
+    "target": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "termination_scope": "delegation"
+  },
+  "nonce": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "aud": "urn:audit:audience",
+  "ref": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "sig": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoiYXVkaXQtdGVzdC1rZXkifQ..cmwh2IaTYEXD9nFuNK4G8Q3yTtLGMD-BGf6vBucLmLVvksdZsWOMpjTDmI5gllD1REPvvCh044aCStxQIDm0Bw"
+}
