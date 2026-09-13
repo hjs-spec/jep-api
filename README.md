@@ -110,6 +110,6 @@ See [HARDENING.md](HARDENING.md) for supported behavior, regression checks, and 
 
 ## Production configuration and migration
 
-The current release is [0.7.1](https://github.com/hjs-spec/jep-api/releases/tag/v0.7.1). See [DEPLOYMENT.md](DEPLOYMENT.md) for PostgreSQL, keyring/Vault configuration, authenticated signing, rotation, SQLite migration and the existing Hugging Face target. Container: `ghcr.io/hjs-spec/jep-api:0.7.1`. Publishing this image does not update an existing service automatically.
+The current release is [0.7.2](https://github.com/hjs-spec/jep-api/releases/tag/v0.7.2). See [DEPLOYMENT.md](DEPLOYMENT.md) for PostgreSQL, keyring/Vault configuration, authenticated signing, rotation, SQLite migration and the existing Hugging Face target. Container: `ghcr.io/hjs-spec/jep-api:0.7.2`. Publishing this image does not update an existing service automatically.
 
 Additional endpoints: `GET /.well-known/jwks.json`, `GET /live`, and archival-only `POST /events/verify-legacy`. Production creation requires Bearer authentication; the SDKs/CLI accept their existing API-key options, and GitHub Action 0.6.2 accepts `jep_api_token`.

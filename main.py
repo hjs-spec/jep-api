@@ -56,7 +56,7 @@ KNOWN_EXTENSIONS = {EXT_TTL, EXT_DIGEST_ONLY}
 
 STATE = configured_state()
 KEYS = KeyManager(STATE)
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 STORAGE_ERRORS = (sqlite3.Error, psycopg.Error)
 if os.environ.get("JEP_DEPLOYMENT_MODE") == "production" and not os.environ.get("JEP_SIGNING_TOKEN_FILE"):
     raise ValueError("Production signing requires JEP_SIGNING_TOKEN_FILE")
@@ -218,18 +218,23 @@ app = FastAPI(
 
 @app.middleware("http")
 async def reject_ambiguous_json(request: Request, call_next):
-    if request.method == "POST" and request.url.path == "/events/create" and os.environ.get("JEP_SIGNING_TOKEN_FILE"):
+    payload = None
+    if request.method == "POST" and request.url.path in {"/events/create", "/events/verify", "/events/verify-legacy"}:
+        try:
+            payload = json.loads((await request.body()).decode("utf-8"), object_pairs_hook=strict_object, parse_constant=reject_constant)
+        except (ValueError, UnicodeError) as exc:
+            return JSONResponse(status_code=400, content={"detail": str(exc)})
+    mutates_state = request.url.path == "/events/create" or (
+        request.url.path == "/events/verify" and isinstance(payload, dict)
+        and (payload.get("mode") == "acceptance" or bool(payload.get("consume_nonce")))
+    )
+    if request.method == "POST" and mutates_state and os.environ.get("JEP_SIGNING_TOKEN_FILE"):
         try:
             token = Path(os.environ["JEP_SIGNING_TOKEN_FILE"]).read_text().strip()
             if not token or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + token):
-                return JSONResponse(status_code=401, content={"detail": "Signing authentication required"})
+                return JSONResponse(status_code=401, content={"detail": "State-changing API authentication required"})
         except OSError:
-            return JSONResponse(status_code=503, content={"detail": "Signing authentication unavailable"})
-    if request.method == "POST" and request.url.path in {"/events/create", "/events/verify", "/events/verify-legacy"}:
-        try:
-            json.loads((await request.body()).decode("utf-8"), object_pairs_hook=strict_object, parse_constant=reject_constant)
-        except (ValueError, UnicodeError) as exc:
-            return JSONResponse(status_code=400, content={"detail": str(exc)})
+            return JSONResponse(status_code=503, content={"detail": "API authentication unavailable"})
     return await call_next(request)
 
 

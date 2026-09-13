@@ -28,4 +28,4 @@ Tests cover persistent keys, multiple SQLite connections, nonce poisoning, priva
 
 Shared event schema SHA-256: `5d0527c1649bd49f0de632e660eff46096522ea76a49eb7104ac83522614059f`.
 
-Release 0.7.1 adds 28 API regression checks in CI, including two independent processes with real PostgreSQL, a single winner for concurrent nonce consumption, key rotation history, authenticated signing and explicit legacy verification. Vault request behavior is tested with a protocol mock; a live Vault deployment still requires its own configured endpoint and credentials.
+Release 0.7.2 adds 29 API regression checks in CI, including two independent processes with real PostgreSQL, a single winner for concurrent nonce consumption, key rotation history, authenticated signing and explicit legacy verification. Vault request behavior is tested with a protocol mock; a live Vault deployment still requires its own configured endpoint and credentials.
