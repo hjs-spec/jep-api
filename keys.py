@@ -12,6 +12,33 @@ from nacl.signing import VerifyKey
 class KeyUnavailable(RuntimeError):
     pass
 
+class InvalidPublicKey(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+def verification_key(key, kid):
+    """Validate resolved key metadata before using any public key bytes."""
+    if not isinstance(key, dict) or key.get("kty") != "OKP" or key.get("crv") != "Ed25519":
+        raise InvalidPublicKey("ERR_ALG_KEY_TYPE_MISMATCH", "Ed25519 requires an OKP/Ed25519 JWK")
+    if "kid" in key and key["kid"] != kid:
+        raise InvalidPublicKey("ERR_KEY_UNRESOLVED", "Resolved JWK kid does not match the requested key")
+    if "alg" in key and key["alg"] != "Ed25519":
+        raise InvalidPublicKey("ERR_ALG_PROFILE_MISMATCH", "JWK alg does not match Ed25519")
+    if "use" in key and key["use"] != "sig":
+        raise InvalidPublicKey("ERR_PROHIBITED_SIGNATURE_ALG", "JWK use does not permit signatures")
+    if "key_ops" in key:
+        ops = key["key_ops"]
+        if not isinstance(ops, list) or not all(isinstance(op, str) for op in ops) or len(ops) != len(set(ops)) or "verify" not in ops:
+            raise InvalidPublicKey("ERR_PROHIBITED_SIGNATURE_ALG", "JWK key_ops does not permit verification")
+    try:
+        raw = decode(key["x"])
+        if len(raw) != 32:
+            raise ValueError("Invalid key length")
+    except (KeyError, TypeError, ValueError):
+        raise InvalidPublicKey("ERR_ALG_KEY_TYPE_MISMATCH", "Ed25519 requires a canonical 32-byte public key") from None
+    return raw
+
 def b64(raw):
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -67,15 +94,15 @@ class KeyManager:
                     if not isinstance(kid,str) or not kid or kid in seen or key.get("kty")!="OKP" or key.get("crv")!="Ed25519":
                         raise ValueError("Invalid or duplicate Ed25519 key")
                     seen.add(kid)
-                    raw=decode(key["x"])
-                    if len(raw)!=32:
-                        raise ValueError("Invalid public key size")
+                    raw=verification_key(key,kid)
                     jwk=public(kid,raw)
                     if "d" in key:
                         signing=Ed25519PrivateKey.from_private_bytes(decode(key["d"]))
                         if signing.public_key().public_bytes_raw()!=raw:
                             raise ValueError("Private/public key mismatch")
                         if kid==active:
+                            if "key_ops" in key and "sign" not in key["key_ops"]:
+                                raise ValueError("Active key does not permit signing")
                             private=signing
                     self.state.register_public_key(kid,jwk)
                 if private is None:

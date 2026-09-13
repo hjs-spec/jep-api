@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jep.org/schemas/jep-validation-result-0.6.schema.json",
+  "title": "JEP Validation Result",
+  "type": "object",
+  "required": [
+    "valid",
+    "level",
+    "mode",
+    "profile",
+    "conformance_class",
+    "scopes",
+    "warnings",
+    "errors"
+  ],
+  "properties": {
+    "valid": {"type": "boolean"},
+    "level": {"type": "integer", "minimum": 0, "maximum": 4},
+    "mode": {"type": "string", "minLength": 1},
+    "profile": {"type": "string", "minLength": 1},
+    "conformance_class": {"type": "string", "minLength": 1},
+    "scopes": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "event_hash": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*:[0-9a-f]+$"},
+        {"type": "null"}
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/diagnostic"}
+    },
+    "errors": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/diagnostic"}
+    },
+    "event_count": {"type": "integer", "minimum": 0},
+    "results": {
+      "type": "array",
+      "items": {"$ref": "#"}
+    },
+    "log_assumption": {
+      "type": "string",
+      "enum": ["partial", "complete"]
+    },
+    "terminated_references": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "required": ["code", "message", "level", "recoverable"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string"},
+        "level": {"type": "integer", "minimum": 0, "maximum": 4},
+        "recoverable": {"type": "boolean"},
+        "evidence": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

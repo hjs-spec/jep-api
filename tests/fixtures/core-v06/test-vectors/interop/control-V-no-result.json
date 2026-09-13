@@ -1,0 +1,15 @@
+{
+  "jep": "1",
+  "verb": "V",
+  "who": "urn:audit:actor",
+  "when": 1788397200,
+  "what": {
+    "verification_scope": [
+      "cryptographic"
+    ]
+  },
+  "nonce": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "aud": "urn:audit:audience",
+  "ref": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "sig": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoiYXVkaXQtdGVzdC1rZXkifQ..O_t7AAHRmQc9BW-3sJu7jqIa4nLZIl2f9NlEgNgYTmEg_XW2oWdCC5kZQeOdiFxQoI4MlKM1wNMEGpoA-ql0DQ"
+}

@@ -1,0 +1,13 @@
+{
+  "jep": "1",
+  "verb": "T",
+  "who": "urn:audit:actor",
+  "when": 1788397200,
+  "what": {
+    "claim": "terminate"
+  },
+  "nonce": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "aud": "urn:audit:audience",
+  "ref": null,
+  "sig": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoiYXVkaXQtdGVzdC1rZXkifQ..1q7HGK5vrp_FLBnjV8kc4p3ivJCDKsZjvKpq1fDaZhlW38bNjhlkY6hSXZwgmUkcJOEMPCCtLV50YBd-5C7BAQ"
+}

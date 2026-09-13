@@ -1,3 +1,3 @@
-# Release 0.7.2
+# Release 0.7.3
 
-Includes PostgreSQL shared state, external keyring/Vault signing, retained key history and explicit legacy verification. State-changing verification now requires the configured API Bearer token, preventing anonymous nonce consumption. Read-only archival verification remains public. Metadata uses one key snapshot during rotation. See DEPLOYMENT.md.
+Complete the JEP-Core-0.6 validation result schema; validate resolved JWK metadata before signature verification; align diagnostics with the 26 official event vectors, including duplicate JSON and malformed JWS. The service remains Level 1 and live deployment remains manual and deferred.

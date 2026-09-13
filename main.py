@@ -32,7 +32,7 @@ import uuid
 from copy import deepcopy
 from pathlib import Path
 from state import configured_state
-from keys import KeyManager, KeyUnavailable
+from keys import KeyManager, KeyUnavailable, InvalidPublicKey, verification_key
 from nacl.signing import VerifyKey
 import psycopg
 import secrets
@@ -49,6 +49,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 JEP_CORE_PROFILE = "jep-core-0.6"
 JEP_WIRE_VERSION = "1"
+JEP_CONFORMANCE_CLASS = "JEP-Baseline-Ed25519-JWS-JCS-0.6"
 
 EXT_TTL = "https://jep.org/ttl"
 EXT_DIGEST_ONLY = "https://jep.org/priv/digest-only"
@@ -56,7 +57,7 @@ KNOWN_EXTENSIONS = {EXT_TTL, EXT_DIGEST_ONLY}
 
 STATE = configured_state()
 KEYS = KeyManager(STATE)
-VERSION = "0.7.2"
+VERSION = "0.7.3"
 STORAGE_ERRORS = (sqlite3.Error, psycopg.Error)
 if os.environ.get("JEP_DEPLOYMENT_MODE") == "production" and not os.environ.get("JEP_SIGNING_TOKEN_FILE"):
     raise ValueError("Production signing requires JEP_SIGNING_TOKEN_FILE")
@@ -87,11 +88,15 @@ def jcs_seed(obj: Any) -> bytes:
     return rfc8785.dumps(obj)
 
 
+class DuplicateMember(ValueError):
+    pass
+
+
 def strict_object(pairs):
     obj = {}
     for key, value in pairs:
         if key in obj:
-            raise ValueError(f"Duplicate JSON member: {key}")
+            raise DuplicateMember(f"Duplicate JSON member: {key}")
         obj[key] = value
     return obj
 
@@ -139,6 +144,8 @@ def detached_jws_verify(event: Dict[str, Any]) -> tuple[bool, Optional[Dict[str,
 
     if not isinstance(protected, dict) or "crit" in protected or protected.get("b64", True) is not True:
         return False, error("ERR_SIGNATURE_CONTAINER_INVALID", "Unsupported protected header", 1)
+    if not isinstance(protected.get("alg"), str) or not isinstance(protected.get("kid"), str) or not protected["kid"]:
+        return False, error("ERR_SIGNATURE_CONTAINER_INVALID", "Protected header requires alg and a non-empty kid", 1)
     if protected.get("alg") != "Ed25519":
         return False, error("ERR_UNSUPPORTED_SIGNATURE_ALG", f"Unsupported alg: {protected.get('alg')}", 1)
 
@@ -148,12 +155,20 @@ def detached_jws_verify(event: Dict[str, Any]) -> tuple[bool, Optional[Dict[str,
         return False, error("ERR_KEY_UNRESOLVED", "Key registry unavailable", 1)
     if jwk is None:
         return False, error("ERR_KEY_UNRESOLVED", "Unknown signing key identifier", 1)
+    try:
+        raw_key = verification_key(jwk, protected["kid"])
+    except InvalidPublicKey as exc:
+        return False, error(exc.code, str(exc), 1)
+    try:
+        raw_signature = b64u_decode(signature_b64)
+    except (ValueError, TypeError) as exc:
+        return False, error("ERR_SIGNATURE_CONTAINER_INVALID", str(exc), 1)
     unsigned = {k: v for k, v in event.items() if k != "sig"}
     payload_b64 = b64u(jcs_seed(unsigned))
     signing_input = f"{protected_b64}.{payload_b64}".encode("ascii")
 
     try:
-        VerifyKey(b64u_decode(jwk["x"])).verify(signing_input, b64u_decode(signature_b64))
+        VerifyKey(raw_key).verify(signing_input, raw_signature)
         return True, None
     except Exception as exc:
         return False, error("ERR_SIGNATURE_INVALID", str(exc), 1)
@@ -177,6 +192,7 @@ def validation_result(
         "level": level,
         "mode": mode,
         "profile": JEP_CORE_PROFILE,
+        "conformance_class": JEP_CONFORMANCE_CLASS,
         "scopes": scopes or [],
         "event_hash": event_hash(event) if event else None,
         "warnings": warnings or [],
@@ -223,6 +239,12 @@ async def reject_ambiguous_json(request: Request, call_next):
         try:
             payload = json.loads((await request.body()).decode("utf-8"), object_pairs_hook=strict_object, parse_constant=reject_constant)
         except (ValueError, UnicodeError) as exc:
+            if request.url.path == "/events/verify":
+                code = "ERR_DUPLICATE_MEMBER" if isinstance(exc, DuplicateMember) else "ERR_INVALID_JSON"
+                # No event/mode can be trusted after strict JSON parsing fails.
+                result = validation_result(False, 0, "unparsed", errors=[error(code, str(exc))])
+                result["detail"] = str(exc)
+                return JSONResponse(status_code=400, content=result)
             return JSONResponse(status_code=400, content={"detail": str(exc)})
     mutates_state = request.url.path == "/events/create" or (
         request.url.path == "/events/verify" and isinstance(payload, dict)
@@ -341,6 +363,36 @@ def verify_event(req: VerifyEventRequest) -> Dict[str, Any]:
     return validate_event(req.event, mode=req.mode, consume_nonce=req.consume_nonce, expected_audience=req.expected_audience)
 
 
+def schema_error_code(event, problem):
+    """Map schema failures to the core 0.6 diagnostic vocabulary.
+
+    The event schema remains the structural authority. Verb-specific required
+    fields are nested inside oneOf, so inspect its object-branch diagnostics.
+    """
+    if problem.validator == "required":
+        if isinstance(event, dict) and "sig" not in event and problem.message == "'sig' is a required property":
+            return "ERR_SIGNATURE_MISSING"
+        return "ERR_MISSING_REQUIRED_FIELD"
+    path = list(problem.absolute_path)
+    if path == ["jep"] and problem.validator == "const":
+        return "ERR_UNSUPPORTED_JEP_VERSION"
+    if path == ["verb"] and problem.validator == "enum":
+        return "ERR_UNKNOWN_VERB"
+    if path == ["when"]:
+        return "ERR_INVALID_TIMESTAMP"
+    if path == ["sig"]:
+        return "ERR_SIGNATURE_CONTAINER_INVALID"
+    if path in [["what"], ["ref"]] and problem.instance is None:
+        return "ERR_MISSING_REQUIRED_FIELD"
+    pending = list(problem.context)
+    while pending:
+        child = pending.pop(0)
+        if child.validator == "required" and isinstance(child.instance, dict) and child.instance:
+            return "ERR_MISSING_REQUIRED_FIELD"
+        pending.extend(child.context)
+    return "ERR_INVALID_FIELD_TYPE"
+
+
 def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce: bool = False,
                    expected_audience: Optional[str] = None) -> Dict[str, Any]:
     def fail(code, message, level=0, scopes=None):
@@ -354,9 +406,10 @@ def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce:
     except (ValueError, TypeError) as exc:
         return fail("ERR_INVALID_JSON", str(exc))
     if problem:
-        return fail("ERR_SCHEMA_INVALID", problem.message)
+        code = schema_error_code(event, problem)
+        return fail(code, problem.message)
     if type(event.get("when")) is not int:
-        return fail("ERR_SCHEMA_INVALID", "when must be an integer Unix timestamp")
+        return fail("ERR_INVALID_TIMESTAMP", "when must be an integer Unix timestamp")
 
     ok, sig_error = detached_jws_verify(event)
     if not ok:
@@ -364,10 +417,10 @@ def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce:
     scopes = ["syntax", "cryptographic"]
     ext = event.get("ext", {})
     for ext_id in event.get("ext_crit", []):
+        if ext_id not in ext:
+            return fail("ERR_EXTENSION_SCHEMA_INVALID", f"Missing critical extension: {ext_id}", 1, scopes)
         if ext_id not in KNOWN_EXTENSIONS:
             return fail("ERR_UNKNOWN_CRITICAL_EXTENSION", f"Unsupported critical extension: {ext_id}", 1, scopes)
-        if ext_id not in ext:
-            return fail("ERR_CRITICAL_EXTENSION_MISSING", f"Missing critical extension: {ext_id}", 1, scopes)
 
     ttl = ext.get(EXT_TTL)
     if ttl is not None:
@@ -403,7 +456,7 @@ def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce:
 
     warnings = []
     if mode == "archival":
-        warnings.append({"code": "ACCEPTANCE_NOT_CHECKED", "message": "Historical integrity only; freshness and live authorization were not checked."})
+        warnings.append(error("ACCEPTANCE_NOT_CHECKED", "Historical integrity only; freshness and live authorization were not checked.", 1))
     return validation_result(True, 1, mode, event=event, scopes=scopes, warnings=warnings)
 
 

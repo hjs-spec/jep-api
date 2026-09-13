@@ -1,0 +1,13 @@
+{
+  "jep": "1",
+  "verb": "J",
+  "who": 42,
+  "when": 1788397200,
+  "what": {
+    "claim": "approve"
+  },
+  "nonce": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "aud": "urn:audit:audience",
+  "ref": null,
+  "sig": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoiYXVkaXQtdGVzdC1rZXkifQ..LyZF0siIizG3InH4A2rITxlXcrrdI8rAOZ5EMI5QawuTMKlNm_yxXDvKhOQJ3J23KkeNEm07LA4rvQJR1b-UDg"
+}

@@ -1,0 +1,13 @@
+{
+  "jep": "1",
+  "verb": "J",
+  "who": "urn:audit:actor",
+  "when": 1788397200,
+  "what": {
+    "claim": "approve"
+  },
+  "nonce": "not-a-uuid",
+  "aud": "urn:audit:audience",
+  "ref": null,
+  "sig": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoiYXVkaXQtdGVzdC1rZXkifQ..TthoKkdUAE0Cu8RCybw9cqNwQjlLSHkowaMSQNBO8iK3x8lOqS5KviDl8yybGoti5uEdgCM55g59Sn1RTEsEDg"
+}

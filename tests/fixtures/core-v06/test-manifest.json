@@ -1,0 +1,241 @@
+{
+  "suite": "jep-v0.6-ietf-alignment",
+  "version": "0.6.1",
+  "description": "Manifest-driven checks for JEP-Core-0.6 syntax, RFC 8785/JWS cryptographic processing, validation levels, and seed chain behavior.",
+  "cases": [
+    {
+      "name": "control-J",
+      "kind": "event",
+      "path": "test-vectors/interop/control-J.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": true,
+      "expected_level": 1,
+      "expected_event_hash": "sha256:e4deec4db8638d34214f2b3c02c6a683e9bc1ada7f95abd5f8eed980ffe7346a"
+    },
+    {
+      "name": "control-D",
+      "kind": "event",
+      "path": "test-vectors/interop/control-D.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": true,
+      "expected_level": 1,
+      "expected_event_hash": "sha256:e6c6488166842f95e2adfa063d82840c54ead5ae976bddfbde8d3f1b6f0fbccc"
+    },
+    {
+      "name": "control-T",
+      "kind": "event",
+      "path": "test-vectors/interop/control-T.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": true,
+      "expected_level": 1,
+      "expected_event_hash": "sha256:0da2774a73316f824644cb54683c5c3b3298c928e304b5c45e4b63e604c03ffc"
+    },
+    {
+      "name": "control-V-without-result",
+      "kind": "event",
+      "path": "test-vectors/interop/control-V-no-result.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": true,
+      "expected_level": 1,
+      "expected_event_hash": "sha256:880b4bcdb64931b86649f92f96aa8e3f5680bd4c8828146dbc4a898c5548c499"
+    },
+    {
+      "name": "jcs-small-number",
+      "kind": "event",
+      "path": "test-vectors/interop/JCS-number-small.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": true,
+      "expected_level": 1,
+      "expected_event_hash": "sha256:90ee420fdf51593d58829af7bb95c273cf5fe573d2a22a735f18f95839cde05b"
+    },
+    {
+      "name": "jcs-float-one",
+      "kind": "event",
+      "path": "test-vectors/interop/JCS-number-float-one.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": true,
+      "expected_level": 1,
+      "expected_event_hash": "sha256:668a57097db6ffdab3496efa36ae629a4e15df399b67deae9497ab77dbb258b8"
+    },
+    {
+      "name": "jcs-utf16-key-order",
+      "kind": "event",
+      "path": "test-vectors/interop/JCS-UTF16-order.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": true,
+      "expected_level": 1,
+      "expected_event_hash": "sha256:13016151730758d682368a5b6c9626e9c541825ed167867afe643a68df235fc7"
+    },
+    {
+      "name": "jcs-html-characters",
+      "kind": "event",
+      "path": "test-vectors/interop/JCS-html-chars.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": true,
+      "expected_level": 1,
+      "expected_event_hash": "sha256:2263c94c966bd4484e3e2274c18fdbdd98ddaa5388c2a28136914634de25dd18"
+    },
+    {
+      "name": "duplicate-member",
+      "kind": "event",
+      "path": "test-vectors/interop/duplicate-member.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_DUPLICATE_MEMBER"
+    },
+    {
+      "name": "missing-J-what",
+      "kind": "event",
+      "path": "test-vectors/interop/J-missing-what.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_MISSING_REQUIRED_FIELD"
+    },
+    {
+      "name": "empty-D-what",
+      "kind": "event",
+      "path": "test-vectors/interop/D-missing-details.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_INVALID_FIELD_TYPE"
+    },
+    {
+      "name": "T-missing-target-and-scope",
+      "kind": "event",
+      "path": "test-vectors/interop/invalid-T-missing-target-scope.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_MISSING_REQUIRED_FIELD"
+    },
+    {
+      "name": "V-missing-verification-scope",
+      "kind": "event",
+      "path": "test-vectors/interop/invalid-V-missing-scope.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_MISSING_REQUIRED_FIELD"
+    },
+    {
+      "name": "V-missing-what",
+      "kind": "event",
+      "path": "test-vectors/interop/invalid-V-missing-what.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_MISSING_REQUIRED_FIELD"
+    },
+    {
+      "name": "invalid-nonce",
+      "kind": "event",
+      "path": "test-vectors/interop/invalid-nonce.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_INVALID_FIELD_TYPE"
+    },
+    {
+      "name": "invalid-when",
+      "kind": "event",
+      "path": "test-vectors/interop/invalid-when-string.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_INVALID_TIMESTAMP"
+    },
+    {
+      "name": "invalid-who",
+      "kind": "event",
+      "path": "test-vectors/interop/invalid-who-number.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_INVALID_FIELD_TYPE"
+    },
+    {
+      "name": "unknown-verb",
+      "kind": "event",
+      "path": "test-vectors/interop/unknown-verb.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_UNKNOWN_VERB"
+    },
+    {
+      "name": "unsupported-JOSE-critical-header",
+      "kind": "event",
+      "path": "test-vectors/interop/JOSE-unknown-critical.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_SIGNATURE_CONTAINER_INVALID"
+    },
+    {
+      "name": "unknown-JEP-critical-extension",
+      "kind": "event",
+      "path": "test-vectors/interop/JEP-unknown-critical-level.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 1,
+      "expected_error": "ERR_UNKNOWN_CRITICAL_EXTENSION"
+    },
+    {
+      "name": "critical-extension-value-absent",
+      "kind": "event",
+      "path": "test-vectors/interop/JEP-known-critical-no-value.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 1,
+      "expected_error": "ERR_EXTENSION_SCHEMA_INVALID"
+    },
+    {
+      "name": "key-unresolved-does-not-complete-level-1",
+      "kind": "event",
+      "path": "test-vectors/interop/key-not-found-level.json",
+      "keys": "test-vectors/interop/key-not-found-level-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_KEY_UNRESOLVED"
+    },
+    {
+      "name": "key-type-mismatch",
+      "kind": "event",
+      "path": "test-vectors/interop/key-type-mismatch.json",
+      "keys": "test-vectors/interop/key-type-mismatch-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_ALG_KEY_TYPE_MISMATCH"
+    },
+    {
+      "name": "invalid-signature",
+      "kind": "event",
+      "path": "test-vectors/interop/invalid-signature-control.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_SIGNATURE_INVALID"
+    },
+    {
+      "name": "signature-noncanonical-base64url",
+      "kind": "event",
+      "path": "test-vectors/interop/signature-noncanonical-base64url.json",
+      "keys": "test-vectors/interop/public-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_SIGNATURE_CONTAINER_INVALID"
+    },
+    {
+      "name": "identity-key-forgery",
+      "kind": "event",
+      "path": "test-vectors/interop/identity-key-forgery.json",
+      "keys": "test-vectors/interop/identity-key-forgery-keys.json",
+      "expected_valid": false,
+      "expected_level": 0,
+      "expected_error": "ERR_SIGNATURE_INVALID"
+    }
+  ]
+}
