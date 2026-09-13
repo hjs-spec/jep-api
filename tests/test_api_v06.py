@@ -68,7 +68,7 @@ def test_digest_only_extension_replaces_plaintext_who():
 
 def test_unknown_critical_extension_rejected():
     r = client.post("/events/create", json={
-        "verb": "J", "what": {},
+        "verb": "J", "what": {"claim": "audit check"},
         "ext": {"https://jac.org/not-implemented": {}},
         "ext_crit": ["https://jac.org/not-implemented"]
     })

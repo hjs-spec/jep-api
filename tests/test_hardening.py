@@ -10,7 +10,7 @@ client = TestClient(main.app)
 
 
 def signed(**changes):
-    event = client.post("/events/create", json={"verb": "J", "what": {}}).json()["event"]
+    event = client.post("/events/create", json={"verb": "J", "what": {"claim": "audit check"}}).json()["event"]
     event.update(changes)
     event.pop("sig")
     event["sig"] = main.detached_jws_sign(event)
@@ -62,3 +62,18 @@ def test_ambiguous_json_rejected(body):
 
 def test_jcs_number_and_utf16_key_order():
     assert main.jcs_seed({"\ue000": 1.0, "\U0001f600": 1e-7}) == '{"😀":1e-7,"\ue000":1}'.encode()
+
+
+def test_utf16_json_is_rejected():
+    body = json.dumps({"verb": "J", "what": {"claim": "utf16"}}).encode("utf-16")
+    assert client.post("/events/create", content=body, headers={"content-type": "application/json"}).status_code == 400
+
+
+def test_replay_store_failure_cannot_accept(monkeypatch):
+    import sqlite3
+    event = signed()
+    def unavailable(*args, **kwargs): raise sqlite3.OperationalError("unavailable")
+    monkeypatch.setattr(main.STATE, "consume_nonce", unavailable)
+    result = main.validate_event(event, mode="acceptance", expected_audience=event["aud"])
+    assert result["valid"] is False
+    assert result["errors"][0]["code"] == "ERR_DOMAIN_REQUIREMENT_UNSATISFIED"

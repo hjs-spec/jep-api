@@ -22,6 +22,8 @@ This is an implementation seed, not a production security service.
 from __future__ import annotations
 
 import base64
+import os
+import sqlite3
 import re
 import hashlib
 import json
@@ -29,7 +31,7 @@ import time
 import uuid
 from copy import deepcopy
 from pathlib import Path
-from threading import Lock
+from state import LocalState
 from typing import Any, Dict, List, Optional, Literal
 
 import rfc8785
@@ -48,10 +50,7 @@ EXT_TTL = "https://jep.org/ttl"
 EXT_DIGEST_ONLY = "https://jep.org/priv/digest-only"
 KNOWN_EXTENSIONS = {EXT_TTL, EXT_DIGEST_ONLY}
 
-# Demo in-memory stores.
-EVENT_STORE: Dict[str, Dict[str, Any]] = {}
-CONSUMED_NONCES: Dict[tuple[str, str, str], int] = {}
-NONCE_LOCK = Lock()
+STATE = LocalState(os.environ.get("JEP_STATE_DIR", ".jep-state"))
 MAX_AGE_SECONDS = 300
 CLOCK_SKEW_SECONDS = 30
 SCHEMA = Draft202012Validator(
@@ -59,8 +58,8 @@ SCHEMA = Draft202012Validator(
     format_checker=FormatChecker(),
 )
 
-# Demo process-local signing key. Production deployments must use a managed key.
-SIGNING_KEY = Ed25519PrivateKey.generate()
+# Local durable key; external key management remains deployment-specific.
+SIGNING_KEY = STATE.signing_key()
 VERIFY_KEY = SIGNING_KEY.public_key()
 DEMO_KID = "did:example:jep-api#key-1"
 DEMO_WHO = "did:example:jep-api"
@@ -210,7 +209,7 @@ app = FastAPI(
 async def reject_ambiguous_json(request: Request, call_next):
     if request.method == "POST" and request.url.path in {"/events/create", "/events/verify"}:
         try:
-            json.loads(await request.body(), object_pairs_hook=strict_object, parse_constant=reject_constant)
+            json.loads((await request.body()).decode("utf-8"), object_pairs_hook=strict_object, parse_constant=reject_constant)
         except (ValueError, UnicodeError) as exc:
             return JSONResponse(status_code=400, content={"detail": str(exc)})
     return await call_next(request)
@@ -287,7 +286,10 @@ def create_event(req: CreateEventRequest) -> Dict[str, Any]:
     result = validate_event(event, mode="archival", consume_nonce=False)
     if not result["valid"]:
         raise HTTPException(status_code=422, detail=result)
-    EVENT_STORE[h] = deepcopy(event)
+    try:
+        STATE.save_event(h, event)
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=503, detail="Event storage is unavailable") from exc
     return {"event": event, "event_hash": h, "validation": result}
 
 
@@ -310,6 +312,8 @@ def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce:
         return fail("ERR_INVALID_JSON", str(exc))
     if problem:
         return fail("ERR_SCHEMA_INVALID", problem.message)
+    if type(event.get("when")) is not int:
+        return fail("ERR_SCHEMA_INVALID", "when must be an integer Unix timestamp")
 
     ok, sig_error = detached_jws_verify(event)
     if not ok:
@@ -346,14 +350,13 @@ def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce:
     # Consume only after all checks pass, atomically and in the actor/audience domain.
     # Acceptance always consumes; archival only does so when explicitly requested.
     if mode == "acceptance" or consume_nonce:
-        nonce_key = (event["who"], event.get("aud", ""), event["nonce"])
-        with NONCE_LOCK:
-            for key, expires in list(CONSUMED_NONCES.items()):
-                if expires < now:
-                    del CONSUMED_NONCES[key]
-            if nonce_key in CONSUMED_NONCES:
-                return fail("ERR_NONCE_REPLAY", "Nonce already consumed in this actor/audience domain", 1, scopes)
-            CONSUMED_NONCES[nonce_key] = max(now, event["when"]) + MAX_AGE_SECONDS + CLOCK_SKEW_SECONDS
+        try:
+            consumed = STATE.consume_nonce(event["who"], event.get("aud", ""), event["nonce"],
+                now=now, expires=max(now, event["when"]) + MAX_AGE_SECONDS + CLOCK_SKEW_SECONDS)
+        except sqlite3.Error:
+            return fail("ERR_DOMAIN_REQUIREMENT_UNSATISFIED", "Replay storage is unavailable", 1, scopes)
+        if not consumed:
+            return fail("ERR_NONCE_REPLAY", "Nonce already consumed in this actor/audience domain", 1, scopes)
 
     warnings = []
     if mode == "archival":
