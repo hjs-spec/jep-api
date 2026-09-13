@@ -84,3 +84,11 @@ def test_postgres_independent_apis(tmp_path):
         for p in procs:p.terminate()
         for p in procs:p.wait(timeout=10)
         for log in logs:log.close()
+
+def test_metadata_observes_rotation_in_one_request(tmp_path,monkeypatch):
+    import main
+    path=tmp_path/"keys.json";keyring(path);monkeypatch.setenv("JEP_KEYRING_FILE",str(path))
+    state=LocalState(tmp_path/"state");manager=KeyManager(state)
+    monkeypatch.setattr(main,"STATE",state);monkeypatch.setattr(main,"KEYS",manager)
+    keyring(path,"key-2")
+    assert main.root()["public_key"]["kid"]=="key-2"

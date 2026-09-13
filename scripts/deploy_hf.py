@@ -12,6 +12,7 @@ variables=api.get_space_variables(SPACE)
 if getattr(variables.get("JEP_DEPLOYMENT_MODE"),"value",None)!="production":
     raise SystemExit("Configure the Space production mode, PostgreSQL and external signing secrets before deployment")
 revision=os.environ["JEP_REVISION"]
+version=Path("VERSION").read_text().strip()
 with tempfile.TemporaryDirectory() as directory:
     target=Path(directory)
     for file in ["main.py","state.py","keys.py","compatibility.py","manage.py","requirements.txt","jep-event.schema.json","Dockerfile"]:shutil.copyfile(file,target/file)
@@ -23,8 +24,8 @@ with tempfile.TemporaryDirectory() as directory:
 for attempt in range(60):
     try:
         response=httpx.get(URL+"/health",timeout=15)
-        if response.status_code==200 and response.json().get("revision")==revision and response.json().get("version")=="0.7.0":
-            print("Verified deployed API 0.7.0 revision",revision);break
+        if response.status_code==200 and response.json().get("revision")==revision and response.json().get("version")==version:
+            print("Verified deployed API",version,"revision",revision);break
     except httpx.HTTPError:pass
     time.sleep(10)
 else:raise SystemExit("Uploaded, but deployed revision did not pass health verification")
