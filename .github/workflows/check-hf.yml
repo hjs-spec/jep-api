@@ -1,0 +1,23 @@
+name: Check Hugging Face deployment configuration
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/deploy_hf.py', '.github/workflows/check-hf.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'huggingface_hub>=1.31,<2' 'httpx>=0.28,<1'
+      - name: Read configuration names without deploying
+        run: python scripts/deploy_hf.py --check-only
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}

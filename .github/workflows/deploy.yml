@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install 'huggingface_hub>=0.32,<2' 'httpx>=0.28,<1'
+      - run: pip install 'huggingface_hub>=1.31,<2' 'httpx>=0.28,<1'
       - run: python scripts/deploy_hf.py
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
