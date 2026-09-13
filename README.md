@@ -103,3 +103,7 @@ A valid signature proves protocol-level integrity under the API seed's demo trus
 - JEP v0.6 Repository: https://github.com/hjs-spec/jep-v06
 - JEP v0.6 Spec Demo: https://huggingface.co/spaces/yuqiangJEP/jep-v06-spec-demo/tree/main
 - JEP v0.6 Conformance Suite: https://huggingface.co/datasets/yuqiangJEP/jep-v06-conformance-suite
+
+## Runtime and verification notes
+
+See [HARDENING.md](HARDENING.md) for supported behavior, regression checks, and compatibility boundaries.
