@@ -18,7 +18,7 @@ Acceptance now requires expected_audience and automatically consumes scoped nonc
 
 ## Durable API state and schema alignment
 
-The API persists its signing seed, signed events, and consumed nonces in SQLite under JEP_STATE_DIR (default `.jep-state`). Reuse the same directory across local workers and restarts. Transactions serialize nonce consumption and key initialization; failed storage never produces an accepted verification. The database is private to the service account. Back up this directory, protect its signing seed, and configure an external/shared store and key manager for multiple hosts.
+The API persists its signing seed, signed events, and consumed nonces in SQLite under JEP_STATE_DIR (default `.jep-state`). Reuse the same directory across local workers and restarts. Transactions serialize nonce consumption and key initialization; failed storage never produces an accepted verification. The database is private to the service account. Back up this directory, protect its signing seed, or migrate using manage.py and configure the implemented PostgreSQL and external keyring/Vault providers for multiple hosts; see DEPLOYMENT.md.
 
 Creation is checked against the same schema shipped by the conformance repair and Action. Empty/null claims and malformed sha256 digests are rejected. Signed member presence remains significant during verification. Input must be UTF-8 without duplicate JSON members. Acceptance requires expected_audience and consumes a nonce after all checks; historical verification does not imply live authority.
 
@@ -27,3 +27,5 @@ Existing in-memory demo keys cannot be recovered after restart. Preserve any alr
 Tests cover persistent keys, multiple SQLite connections, nonce poisoning, privacy, malformed input, and expiry. The cross-repository harness additionally restarts a real API process and verifies previous signatures/replay state.
 
 Shared event schema SHA-256: `5d0527c1649bd49f0de632e660eff46096522ea76a49eb7104ac83522614059f`.
+
+Release 0.7.1 adds 28 API regression checks in CI, including two independent processes with real PostgreSQL, a single winner for concurrent nonce consumption, key rotation history, authenticated signing and explicit legacy verification. Vault request behavior is tested with a protocol mock; a live Vault deployment still requires its own configured endpoint and credentials.
