@@ -1,8 +1,5 @@
 name: Check Hugging Face deployment configuration
 on:
-  push:
-    branches: [main]
-    paths: ['scripts/deploy_hf.py', '.github/workflows/check-hf.yml']
   workflow_dispatch:
 permissions:
   contents: read

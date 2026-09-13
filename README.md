@@ -1,6 +1,10 @@
-# JEP API 0.7 (JEP-Core-0.6)
+# JEP-Core-0.6 Reference API
 
 FastAPI event creation and verification for JEP-Core-0.6, with PostgreSQL multi-host state, external Ed25519 signing providers and explicit historical-format verification.
+
+Protocol profile: `jep-core-0.6`; wire version: `"1"`. The implementation release `0.7.2` is a separate software version, not a JEP 0.7 protocol revision.
+
+Current delivery scope is the updated repository implementation. Live deployment and external database provisioning are deferred. Both Hugging Face configuration checks and deployment are manual workflows; merging code or publishing an implementation release does not update the live Space.
 
 This repository upgrades the earlier JEP-04 API demo into a JEP v0.6-style API seed aligned with:
 
