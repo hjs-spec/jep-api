@@ -22,13 +22,21 @@ This is an implementation seed, not a production security service.
 from __future__ import annotations
 
 import base64
+import re
 import hashlib
 import json
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from copy import deepcopy
+from pathlib import Path
+from threading import Lock
+from typing import Any, Dict, List, Optional, Literal
 
-from fastapi import FastAPI, HTTPException
+import rfc8785
+from jsonschema import Draft202012Validator, FormatChecker
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
@@ -42,7 +50,14 @@ KNOWN_EXTENSIONS = {EXT_TTL, EXT_DIGEST_ONLY}
 
 # Demo in-memory stores.
 EVENT_STORE: Dict[str, Dict[str, Any]] = {}
-CONSUMED_NONCES: set[str] = set()
+CONSUMED_NONCES: Dict[tuple[str, str, str], int] = {}
+NONCE_LOCK = Lock()
+MAX_AGE_SECONDS = 300
+CLOCK_SKEW_SECONDS = 30
+SCHEMA = Draft202012Validator(
+    json.loads(Path(__file__).with_name("jep-event.schema.json").read_text()),
+    format_checker=FormatChecker(),
+)
 
 # Demo process-local signing key. Production deployments must use a managed key.
 SIGNING_KEY = Ed25519PrivateKey.generate()
@@ -56,16 +71,28 @@ def b64u(data: bytes) -> str:
 
 
 def b64u_decode(data: str) -> bytes:
-    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", data) or b64u(raw) != data:
+        raise ValueError("Non-canonical base64url encoding")
+    return raw
 
 
 def jcs_seed(obj: Any) -> bytes:
-    """JCS-compatible canonicalization for seed objects.
+    """RFC 8785 canonicalization; rejects non-I-JSON values."""
+    return rfc8785.dumps(obj)
 
-    This is sufficient for deterministic seed vectors. Production
-    implementations should use a complete RFC 8785 JCS implementation.
-    """
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+def strict_object(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"Duplicate JSON member: {key}")
+        obj[key] = value
+    return obj
+
+
+def reject_constant(value):
+    raise ValueError(f"Non-finite JSON number: {value}")
 
 
 def sha256_digest(data: bytes) -> str:
@@ -100,13 +127,17 @@ def detached_jws_verify(event: Dict[str, Any]) -> tuple[bool, Optional[Dict[str,
         return False, error("ERR_SIGNATURE_CONTAINER_INVALID", "JWS payload segment must be empty", 1)
 
     try:
-        protected = json.loads(b64u_decode(protected_b64))
+        protected = json.loads(b64u_decode(protected_b64), object_pairs_hook=strict_object, parse_constant=reject_constant)
     except Exception as exc:
         return False, error("ERR_SIGNATURE_CONTAINER_INVALID", f"Invalid protected header: {exc}", 1)
 
+    if not isinstance(protected, dict) or "crit" in protected or protected.get("b64", True) is not True:
+        return False, error("ERR_SIGNATURE_CONTAINER_INVALID", "Unsupported protected header", 1)
     if protected.get("alg") != "Ed25519":
         return False, error("ERR_UNSUPPORTED_SIGNATURE_ALG", f"Unsupported alg: {protected.get('alg')}", 1)
 
+    if protected.get("kid") != DEMO_KID:
+        return False, error("ERR_KEY_UNRESOLVED", "Unknown signing key identifier", 1)
     unsigned = {k: v for k, v in event.items() if k != "sig"}
     payload_b64 = b64u(jcs_seed(unsigned))
     signing_input = f"{protected_b64}.{payload_b64}".encode("ascii")
@@ -145,20 +176,21 @@ def validation_result(
 
 class CreateEventRequest(BaseModel):
     verb: str = Field(..., pattern="^(J|D|T|V)$")
-    who: str = Field(default=DEMO_WHO)
+    who: str = Field(default=DEMO_WHO, min_length=1)
     what: Any
     aud: Optional[str] = "https://api.example.org"
-    ref: Optional[str] = None
-    ttl_minutes: Optional[int] = None
+    ref: str | Dict[str, Any] | None = None
+    ttl_minutes: Optional[int] = Field(default=None, gt=0, strict=True)
     digest_only_who: bool = False
-    ext: Dict[str, Any] = Field(default_factory=dict)
+    ext: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     ext_crit: List[str] = Field(default_factory=list)
 
 
 class VerifyEventRequest(BaseModel):
     event: Dict[str, Any]
-    mode: str = "archival"
+    mode: Literal["archival", "acceptance"] = "archival"
     consume_nonce: bool = False
+    expected_audience: Optional[str] = None
 
 
 class EventResponse(BaseModel):
@@ -172,6 +204,16 @@ app = FastAPI(
     version="0.6.0",
     description="FastAPI seed for JEP v0.6 event creation and verification.",
 )
+
+
+@app.middleware("http")
+async def reject_ambiguous_json(request: Request, call_next):
+    if request.method == "POST" and request.url.path in {"/events/create", "/events/verify"}:
+        try:
+            json.loads(await request.body(), object_pairs_hook=strict_object, parse_constant=reject_constant)
+        except (ValueError, UnicodeError) as exc:
+            return JSONResponse(status_code=400, content={"detail": str(exc)})
+    return await call_next(request)
 
 
 @app.get("/")
@@ -200,12 +242,13 @@ def create_event(req: CreateEventRequest) -> Dict[str, Any]:
     now = int(time.time())
 
     who = req.who
-    ext = dict(req.ext or {})
+    ext = deepcopy(req.ext or {})
     ext_crit = list(req.ext_crit or [])
 
     if req.digest_only_who:
         salt = b64u(hashlib.sha256(str(uuid.uuid4()).encode()).digest()[:16])
         who_digest = sha256_digest(f"{who}:{salt}".encode("utf-8"))
+        who = who_digest
         ext.setdefault(EXT_DIGEST_ONLY, {})["who_digest"] = who_digest
         ext[EXT_DIGEST_ONLY]["salt_hint"] = "not disclosed"
         if EXT_DIGEST_ONLY not in ext_crit:
@@ -227,90 +270,92 @@ def create_event(req: CreateEventRequest) -> Dict[str, Any]:
         "aud": req.aud,
         "ref": req.ref,
     }
+    if req.aud is None:
+        event.pop("aud")
 
     if ext:
         event["ext"] = ext
     if ext_crit:
         event["ext_crit"] = ext_crit
 
-    event["sig"] = detached_jws_sign(event)
+    try:
+        event["sig"] = detached_jws_sign(event)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     h = event_hash(event)
-    EVENT_STORE[h] = event
-
     result = validate_event(event, mode="archival", consume_nonce=False)
+    if not result["valid"]:
+        raise HTTPException(status_code=422, detail=result)
+    EVENT_STORE[h] = deepcopy(event)
     return {"event": event, "event_hash": h, "validation": result}
 
 
 @app.post("/events/verify")
 def verify_event(req: VerifyEventRequest) -> Dict[str, Any]:
-    return validate_event(req.event, mode=req.mode, consume_nonce=req.consume_nonce)
+    return validate_event(req.event, mode=req.mode, consume_nonce=req.consume_nonce, expected_audience=req.expected_audience)
 
 
-def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce: bool = False) -> Dict[str, Any]:
-    required = ["jep", "verb", "who", "when", "nonce", "sig"]
-    for field in required:
-        if field not in event:
-            return validation_result(False, 0, mode, errors=[
-                error("ERR_MISSING_REQUIRED_FIELD", f"Missing {field}", 0)
-            ])
+def validate_event(event: Dict[str, Any], mode: str = "archival", consume_nonce: bool = False,
+                   expected_audience: Optional[str] = None) -> Dict[str, Any]:
+    def fail(code, message, level=0, scopes=None):
+        return validation_result(False, level, mode, errors=[error(code, message, level)], scopes=scopes)
 
-    if event.get("jep") != JEP_WIRE_VERSION:
-        return validation_result(False, 0, mode, event=event, errors=[
-            error("ERR_UNSUPPORTED_JEP_VERSION", "jep must be '1'", 0)
-        ])
-
-    if event.get("verb") not in {"J", "D", "T", "V"}:
-        return validation_result(False, 0, mode, event=event, errors=[
-            error("ERR_UNKNOWN_VERB", "verb must be J/D/T/V", 0)
-        ])
-
-    if not isinstance(event.get("when"), int):
-        return validation_result(False, 0, mode, event=event, errors=[
-            error("ERR_INVALID_TIMESTAMP", "when must be integer seconds", 0)
-        ])
-
-    if event.get("verb") in {"J", "D", "T"} and "what" not in event:
-        return validation_result(False, 0, mode, event=event, errors=[
-            error("ERR_MISSING_REQUIRED_FIELD", f"{event.get('verb')} requires what", 0)
-        ])
-
-    if event.get("verb") == "V" and (not event.get("ref")):
-        return validation_result(False, 0, mode, event=event, errors=[
-            error("ERR_MISSING_REQUIRED_FIELD", "V requires ref", 0)
-        ])
-
-    if consume_nonce:
-        nonce = event.get("nonce")
-        if nonce in CONSUMED_NONCES:
-            return validation_result(False, 1, mode, event=event, errors=[
-                error("ERR_NONCE_REPLAY", "nonce already consumed", 2)
-            ], scopes=["syntax"])
-        CONSUMED_NONCES.add(nonce)
+    if mode not in {"archival", "acceptance"}:
+        return fail("ERR_INVALID_MODE", "mode must be archival or acceptance")
+    try:
+        jcs_seed(event)
+        problem = next(SCHEMA.iter_errors(event), None)
+    except (ValueError, TypeError) as exc:
+        return fail("ERR_INVALID_JSON", str(exc))
+    if problem:
+        return fail("ERR_SCHEMA_INVALID", problem.message)
 
     ok, sig_error = detached_jws_verify(event)
     if not ok:
-        return validation_result(False, 0, mode, event=event, errors=[sig_error], scopes=["syntax"])
-
-    warnings: List[Dict[str, Any]] = []
-    for ext_id in event.get("ext_crit", []) or []:
-        if ext_id not in KNOWN_EXTENSIONS and not ext_id.startswith("https://jac.org/") and not ext_id.startswith("https://hjs.org/"):
-            return validation_result(False, 2, mode, event=event, errors=[
-                error("ERR_UNKNOWN_CRITICAL_EXTENSION", f"Unknown critical extension: {ext_id}", 3)
-            ], scopes=["syntax", "cryptographic"])
-
+        return validation_result(False, 0, mode, errors=[sig_error], scopes=["syntax"])
+    scopes = ["syntax", "cryptographic"]
     ext = event.get("ext", {})
-    ttl = ext.get(EXT_TTL, {})
-    if isinstance(ttl, dict) and ttl.get("expires_at") and int(time.time()) > int(ttl["expires_at"]):
-        return validation_result(False, 3, mode, event=event, errors=[
-            error("ERR_POLICY_REJECTED", "event TTL expired", 4)
-        ], scopes=["syntax", "cryptographic", "extension_processing"])
+    for ext_id in event.get("ext_crit", []):
+        if ext_id not in KNOWN_EXTENSIONS:
+            return fail("ERR_UNKNOWN_CRITICAL_EXTENSION", f"Unsupported critical extension: {ext_id}", 1, scopes)
+        if ext_id not in ext:
+            return fail("ERR_CRITICAL_EXTENSION_MISSING", f"Missing critical extension: {ext_id}", 1, scopes)
 
-    return validation_result(
-        True,
-        1,
-        mode,
-        event=event,
-        warnings=warnings,
-        scopes=["syntax", "cryptographic"],
-    )
+    ttl = ext.get(EXT_TTL)
+    if ttl is not None:
+        if type(ttl.get("expires_at")) is not int:
+            return fail("ERR_EXTENSION_INVALID", "TTL expires_at must be integer seconds", 1, scopes)
+        if "ttl_minutes" in ttl and (type(ttl["ttl_minutes"]) is not int or ttl["ttl_minutes"] <= 0):
+            return fail("ERR_EXTENSION_INVALID", "TTL ttl_minutes must be a positive integer", 1, scopes)
+    digest = ext.get(EXT_DIGEST_ONLY)
+    if digest is not None and digest.get("who_digest") != event["who"]:
+        return fail("ERR_EXTENSION_INVALID", "Digest-only who must equal who_digest", 1, scopes)
+
+    now = int(time.time())
+    if mode == "acceptance":
+        if not expected_audience:
+            return fail("ERR_DOMAIN_REQUIREMENT_UNSATISFIED", "Acceptance requires expected_audience", 1, scopes)
+        if event.get("aud") != expected_audience:
+            return fail("ERR_DOMAIN_REQUIREMENT_UNSATISFIED", "Audience mismatch", 1, scopes)
+        if event["when"] < now - MAX_AGE_SECONDS or event["when"] > now + CLOCK_SKEW_SECONDS:
+            return fail("ERR_INVALID_TIMESTAMP", "Event is outside the acceptance window", 1, scopes)
+        if ttl is not None and now >= ttl["expires_at"]:
+            return fail("ERR_POLICY_REJECTED", "Event TTL expired", 1, scopes)
+
+    # Consume only after all checks pass, atomically and in the actor/audience domain.
+    # Acceptance always consumes; archival only does so when explicitly requested.
+    if mode == "acceptance" or consume_nonce:
+        nonce_key = (event["who"], event.get("aud", ""), event["nonce"])
+        with NONCE_LOCK:
+            for key, expires in list(CONSUMED_NONCES.items()):
+                if expires < now:
+                    del CONSUMED_NONCES[key]
+            if nonce_key in CONSUMED_NONCES:
+                return fail("ERR_NONCE_REPLAY", "Nonce already consumed in this actor/audience domain", 1, scopes)
+            CONSUMED_NONCES[nonce_key] = max(now, event["when"]) + MAX_AGE_SECONDS + CLOCK_SKEW_SECONDS
+
+    warnings = []
+    if mode == "archival":
+        warnings.append({"code": "ACCEPTANCE_NOT_CHECKED", "message": "Historical integrity only; freshness and live authorization were not checked."})
+    return validation_result(True, 1, mode, event=event, scopes=scopes, warnings=warnings)

@@ -52,7 +52,7 @@ def test_ttl_extension_is_under_ext():
     assert "ttl" not in event
 
 
-def test_digest_only_extension_does_not_replace_who():
+def test_digest_only_extension_replaces_plaintext_who():
     created = client.post("/events/create", json={
         "verb": "J",
         "who": "did:example:human-123",
@@ -60,21 +60,17 @@ def test_digest_only_extension_does_not_replace_who():
         "digest_only_who": True
     }).json()
     event = created["event"]
-    assert event["who"] == "did:example:human-123"
+    assert event["who"].startswith("sha256:")
+    assert "did:example:human-123" not in str(created)
     assert EXT_DIGEST_ONLY in event["ext"]
     assert "who_digest" in event["ext"][EXT_DIGEST_ONLY]
 
 
 def test_unknown_critical_extension_rejected():
-    created = client.post("/events/create", json={
-        "verb": "J",
-        "what": {"claim": "approve"},
-        "ext": {"https://unknown.example/ext": {"required": True}},
-        "ext_crit": ["https://unknown.example/ext"]
-    }).json()
-    event = created["event"]
-    r = client.post("/events/verify", json={"event": event})
-    assert r.status_code == 200
-    data = r.json()
-    assert data["valid"] is False
-    assert data["errors"][0]["code"] == "ERR_UNKNOWN_CRITICAL_EXTENSION"
+    r = client.post("/events/create", json={
+        "verb": "J", "what": {},
+        "ext": {"https://jac.org/not-implemented": {}},
+        "ext_crit": ["https://jac.org/not-implemented"]
+    })
+    assert r.status_code == 422
+    assert r.json()["detail"]["errors"][0]["code"] == "ERR_UNKNOWN_CRITICAL_EXTENSION"

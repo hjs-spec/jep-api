@@ -4,3 +4,5 @@ pydantic
 cryptography
 pytest
 httpx
+rfc8785>=0.1.4,<1
+jsonschema>=4.18,<5

@@ -1,0 +1,278 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jep.org/schemas/jep-event-0.6.schema.json",
+  "title": "JEP Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "jep",
+    "verb",
+    "who",
+    "when",
+    "nonce",
+    "sig"
+  ],
+  "properties": {
+    "jep": {
+      "type": "string",
+      "const": "1"
+    },
+    "verb": {
+      "type": "string",
+      "enum": [
+        "J",
+        "D",
+        "T",
+        "V"
+      ]
+    },
+    "who": {
+      "type": "string",
+      "minLength": 1
+    },
+    "when": {
+      "type": "integer"
+    },
+    "what": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+:[0-9a-f]+$"
+        },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "claim": {
+              "type": "string"
+            },
+            "subject": {},
+            "scope": {},
+            "result": {},
+            "evidence": {},
+            "context": {},
+            "delegatee": {
+              "type": "string"
+            },
+            "constraints": {
+              "type": "array"
+            },
+            "target": {},
+            "termination_scope": {
+              "type": "string"
+            },
+            "verification_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nonce": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "aud": {
+      "type": "string"
+    },
+    "ref": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+:[0-9a-f]+$"
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "value": {},
+            "hash": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+:[0-9a-f]+$"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ext": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "ext_crit": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "sig": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verb": {
+            "const": "J"
+          }
+        },
+        "required": [
+          "verb"
+        ]
+      },
+      "then": {
+        "required": [
+          "what"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verb": {
+            "const": "D"
+          }
+        },
+        "required": [
+          "verb"
+        ]
+      },
+      "then": {
+        "required": [
+          "what",
+          "ref"
+        ],
+        "properties": {
+          "what": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+:[0-9a-f]+$"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "claim",
+                  "delegatee",
+                  "scope"
+                ]
+              },
+              {
+                "type": "null",
+                "not": {}
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verb": {
+            "const": "T"
+          }
+        },
+        "required": [
+          "verb"
+        ]
+      },
+      "then": {
+        "required": [
+          "what",
+          "ref"
+        ],
+        "properties": {
+          "what": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+:[0-9a-f]+$"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "claim",
+                  "target",
+                  "termination_scope"
+                ]
+              },
+              {
+                "type": "null",
+                "not": {}
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verb": {
+            "const": "V"
+          }
+        },
+        "required": [
+          "verb"
+        ]
+      },
+      "then": {
+        "required": [
+          "ref",
+          "what"
+        ],
+        "properties": {
+          "ref": {
+            "not": {
+              "type": "null"
+            }
+          },
+          "what": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+:[0-9a-f]+$"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "verification_scope"
+                ]
+              },
+              {
+                "type": "null",
+                "not": {}
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
