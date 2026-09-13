@@ -1,0 +1,28 @@
+# Start with explicit secrets: no generated credentials or ephemeral signing keys.
+services:
+  api:
+    build:
+      context: ..
+      args:
+        JEP_REVISION: ${JEP_REVISION:?Set the deployed commit SHA}
+    environment:
+      JEP_DEPLOYMENT_MODE: production
+      JEP_DATABASE_URL_FILE: /run/secrets/database_url
+      JEP_KEYRING_FILE: /run/secrets/keyring
+      JEP_SIGNING_TOKEN_FILE: /run/secrets/signing_token
+    secrets:
+      - source: database_url
+        mode: 0400
+      - source: keyring
+        mode: 0400
+      - source: signing_token
+        mode: 0400
+    ports: ['7860']
+    restart: unless-stopped
+secrets:
+  database_url:
+    file: ${JEP_DATABASE_URL_FILE:?Set the database URL file}
+  keyring:
+    file: ${JEP_KEYRING_FILE:?Set the private keyring file}
+  signing_token:
+    file: ${JEP_SIGNING_TOKEN_FILE:?Set the API signing token file}

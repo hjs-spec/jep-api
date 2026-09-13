@@ -1,0 +1,30 @@
+name: Deploy existing Hugging Face API
+on:
+  workflow_run:
+    workflows: ['Publish versioned release']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hf-jep-api-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'huggingface_hub>=0.32,<2' 'httpx>=0.28,<1'
+      - run: python scripts/deploy_hf.py
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          JEP_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
