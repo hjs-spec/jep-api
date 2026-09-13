@@ -1,16 +1,36 @@
 """Deploy the existing Space with an explicit tested revision, then verify readiness."""
-import os,shutil,tempfile,time
+import argparse,os,shutil,tempfile,time
 from pathlib import Path
 import httpx
 from huggingface_hub import HfApi
 SPACE="yuqiangJEP/jep-api"
 URL="https://yuqiangjep-jep-api.hf.space"
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--check-only",action="store_true",help="Check Space configuration without uploading or restarting")
+args=parser.parse_args()
 token=os.environ.get("HF_TOKEN")
 if not token:raise SystemExit("HF_TOKEN write credential is not configured")
 api=HfApi(token=token)
 variables=api.get_space_variables(SPACE)
+secrets=api.get_space_secrets(SPACE)
+print("HF_TOKEN authenticated; Space configuration metadata is readable")
+missing=[]
 if getattr(variables.get("JEP_DEPLOYMENT_MODE"),"value",None)!="production":
-    raise SystemExit("Configure the Space production mode, PostgreSQL and external signing secrets before deployment")
+    missing.append("variable JEP_DEPLOYMENT_MODE=production")
+for name in ("JEP_DATABASE_URL","JEP_SIGNING_TOKEN"):
+    if name not in secrets:missing.append("secret "+name)
+if "JEP_KEYRING_JSON" not in secrets:
+    vault=getattr(variables.get("JEP_VAULT_ADDR"),"value","")
+    if vault:
+        if not vault.startswith("https://"):missing.append("HTTPS variable JEP_VAULT_ADDR")
+        for name in ("JEP_VAULT_KEY","JEP_VAULT_KID_PREFIX"):
+            if not getattr(variables.get(name),"value",""):missing.append("variable "+name)
+        if "JEP_VAULT_TOKEN" not in secrets:missing.append("secret JEP_VAULT_TOKEN")
+    else:missing.append("secret JEP_KEYRING_JSON (or complete Vault configuration)")
+if missing:raise SystemExit("Missing Space configuration: "+"; ".join(missing))
+if args.check_only:
+    print("Required configuration names are present; secret values and service readiness are verified at startup")
+    raise SystemExit(0)
 revision=os.environ["JEP_REVISION"]
 version=Path("VERSION").read_text().strip()
 with tempfile.TemporaryDirectory() as directory:
