@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jep.org/schemas/jep-validation-result-0.7.schema.json",
+  "title": "JEP Core 0.7 Validation Result",
+  "type": "object",
+  "required": [
+    "status",
+    "mode",
+    "profile",
+    "checks",
+    "warnings",
+    "errors"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "valid",
+        "invalid",
+        "indeterminate"
+      ]
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "archival",
+        "acceptance",
+        "chain",
+        "policy"
+      ]
+    },
+    "profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "conformance_class": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_identity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "who",
+            "id"
+          ],
+          "properties": {
+            "who": {
+              "type": "string",
+              "minLength": 1
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "event_hash": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*:[0-9a-f]+$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "pass",
+          "fail",
+          "not_checked",
+          "not_applicable",
+          "unsupported",
+          "indeterminate"
+        ]
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "effect_applied"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "already_accepted",
+            "rejected",
+            "indeterminate"
+          ]
+        },
+        "effect_applied": {
+          "type": "boolean"
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    }
+  },
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recoverable": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}
