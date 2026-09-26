@@ -2,7 +2,7 @@ name: Publish versioned release
 on:
   push:
     branches: [main]
-    paths: [VERSION, '.github/workflows/release.yml']
+    paths: [VERSION]
   workflow_dispatch:
 permissions:
   contents: read
@@ -37,7 +37,7 @@ jobs:
       - run: mkdir -p dist && git archive --format=tar.gz --output=dist/jep-api-source.tar.gz HEAD
       - name: Validate release version
         run: |
-          python -c "import pathlib,re; v=pathlib.Path('VERSION').read_text().strip(); assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:a[0-9]+)?',v)"
+          python -c "import pathlib,re; v=pathlib.Path('VERSION').read_text().strip(); assert __import__('main').VERSION == v; assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:a[0-9]+)?',v)"
       - uses: actions/upload-artifact@v4
         with:
           name: distributions
@@ -71,6 +71,22 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          load: true
           tags: ghcr.io/hjs-spec/jep-api:${{ steps.version.outputs.version }}
           build-args: JEP_REVISION=${{ github.sha }}
+      - name: Check the built image starts with the current API
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          image="ghcr.io/hjs-spec/jep-api:$RELEASE_VERSION"
+          docker run -d --name jep-release-smoke -p 7860:7860 "$image"
+          trap 'docker logs jep-release-smoke; docker rm -f jep-release-smoke' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:7860/health > /tmp/health.json; then
+              python -c "import json,os; h=json.load(open('/tmp/health.json')); assert h['profile']=='jep-core-0.7'; assert h['version']==os.environ['RELEASE_VERSION']; assert h['revision']==os.environ['GITHUB_SHA']"
+              docker push "$image"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1

@@ -168,3 +168,5 @@ Both paths use transactional state updates.
 
 See `DEPLOYMENT.md` for operational hardening and `compatibility.py` for
 explicit historical integrity verification.
+
+The current schema is synchronized from `hjs-spec/jep-core` revision `da3fca00be456497f2dbfa045a1bc84aa3ce966d`; its published -07 source remains frozen.

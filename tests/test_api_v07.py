@@ -90,3 +90,46 @@ def test_legacy_06_route_still_operates():
     assert "nonce" in event
     assert "id" not in event
     assert legacy.json()["validation"]["profile"] == "jep-core-0.6"
+
+
+def test_unresolved_key_is_indeterminate_without_acceptance():
+    event = create()["event"]
+    header, _, signature = event["sig"].split(".")
+    import json
+    protected = json.loads(main.b64u_decode(header))
+    protected["kid"] = "unresolved-test-key"
+    event["sig"] = f'{main.b64u(main.jcs_seed(protected))}..{signature}'
+    result = client.post("/v0.7/events/verify", json={"event": event, "mode": "acceptance"}).json()
+    assert result["status"] == "indeterminate"
+    assert result["checks"]["cryptographic"] == "indeterminate"
+    assert result["acceptance"] == {"outcome": "indeterminate", "effect_applied": False}
+
+
+def test_ascii_identity_matches_reference_schema():
+    assert create(id="local event\t7")["validation"]["status"] == "valid"
+
+
+def test_expired_ttl_is_archivable_but_not_accepted():
+    event = create()["event"]
+    event["ext"] = {main.EXT_TTL: {"expires_at": 1, "ttl_minutes": 1}}
+    event["ext_crit"] = [main.EXT_TTL]
+    event["sig"] = main.detached_jws_sign({k: v for k, v in event.items() if k != "sig"})
+    assert main.validate_event_07(event)["status"] == "valid"
+    result = main.validate_event_07(event, mode="acceptance")
+    assert result["errors"][0]["code"] == "ERR_EVENT_EXPIRED"
+    assert result["acceptance"]["effect_applied"] is False
+    event["ext"][main.EXT_TTL]["expires_at"] = int(main.time.time()) + 60
+    event["sig"] = main.detached_jws_sign({k: v for k, v in event.items() if k != "sig"})
+    assert main.validate_event_07(event, mode="acceptance")["acceptance"]["outcome"] == "accepted"
+
+
+def test_known_extensions_are_validated_before_acceptance():
+    for ext in ({main.EXT_TTL: {"expires_at": "tomorrow"}},
+                {main.EXT_DIGEST_ONLY: {"who_digest": "different"}}):
+        event = create()["event"]
+        event["ext"] = ext
+        event["ext_crit"] = list(ext)
+        event["sig"] = main.detached_jws_sign({k: v for k, v in event.items() if k != "sig"})
+        result = main.validate_event_07(event, mode="acceptance")
+        assert result["checks"]["extension_processing"] == "fail"
+        assert result["acceptance"]["effect_applied"] is False

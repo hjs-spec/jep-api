@@ -58,3 +58,28 @@ def test_vault_check_is_read_only(monkeypatch):
     variables = {"JEP_DEPLOYMENT_MODE": "production", "JEP_VAULT_ADDR": "https://vault",
                  "JEP_VAULT_KEY": "jep", "JEP_VAULT_KID_PREFIX": "jep-key"}
     assert run_check(monkeypatch, variables, ["JEP_DATABASE_URL", "JEP_SIGNING_TOKEN", "JEP_VAULT_TOKEN"]) == 0
+
+
+def test_deployment_upload_contains_current_schema(monkeypatch):
+    import httpx
+    root = SCRIPT.parents[1]
+    monkeypatch.chdir(root)
+    monkeypatch.setenv("HF_TOKEN", "TEST_TOKEN_DO_NOT_LOG")
+    monkeypatch.setenv("JEP_REVISION", "tested-revision")
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT)])
+    captured = []
+    def upload(**kwargs):
+        folder = Path(kwargs["folder_path"])
+        assert (folder / "jep-event-0.7.schema.json").read_bytes() == (root / "jep-event-0.7.schema.json").read_bytes()
+        assert "jep-event-0.7.schema.json" in (folder / "Dockerfile").read_text()
+        captured.append(True)
+    api = SimpleNamespace(
+        get_space_variables=lambda space: {"JEP_DEPLOYMENT_MODE": SimpleNamespace(value="production")},
+        get_space_secrets=lambda space: {k: None for k in ("JEP_DATABASE_URL", "JEP_SIGNING_TOKEN", "JEP_KEYRING_JSON")},
+        upload_folder=upload,
+    )
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(HfApi=lambda **kw: api))
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: SimpleNamespace(status_code=200, json=lambda: {
+        "revision": "tested-revision", "version": (root / "VERSION").read_text().strip(), "profile": "jep-core-0.7"}))
+    runpy.run_path(str(SCRIPT), run_name="__main__")
+    assert captured == [True]

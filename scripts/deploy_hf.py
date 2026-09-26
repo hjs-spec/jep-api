@@ -35,7 +35,7 @@ revision=os.environ["JEP_REVISION"]
 version=Path("VERSION").read_text().strip()
 with tempfile.TemporaryDirectory() as directory:
     target=Path(directory)
-    for file in ["main.py","state.py","keys.py","compatibility.py","manage.py","requirements.txt","jep-event.schema.json","Dockerfile"]:shutil.copyfile(file,target/file)
+    for file in ["main.py","state.py","keys.py","compatibility.py","manage.py","requirements.txt","jep-event.schema.json","jep-event-0.7.schema.json","Dockerfile"]:shutil.copyfile(file,target/file)
     (target/"scripts").mkdir();shutil.copyfile("scripts/entrypoint.py",target/"scripts/entrypoint.py")
     docker=(target/"Dockerfile").read_text().replace("ARG JEP_REVISION=unknown",f"ARG JEP_REVISION={revision}")
     (target/"Dockerfile").write_text(docker)
@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory() as directory:
 for attempt in range(60):
     try:
         response=httpx.get(URL+"/health",timeout=15)
-        if response.status_code==200 and response.json().get("revision")==revision and response.json().get("version")==version:
+        if response.status_code==200 and response.json().get("revision")==revision and response.json().get("version")==version and response.json().get("profile")=="jep-core-0.7":
             print("Verified deployed API",version,"revision",revision);break
     except httpx.HTTPError:pass
     time.sleep(10)
