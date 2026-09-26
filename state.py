@@ -22,6 +22,14 @@ class LocalState:
                     actor TEXT NOT NULL, audience TEXT NOT NULL, nonce TEXT NOT NULL, expires INTEGER NOT NULL,
                     PRIMARY KEY (actor, audience, nonce));
                 CREATE TABLE IF NOT EXISTS events (hash TEXT PRIMARY KEY, payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS accepted_events (
+                    actor TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    payload_digest TEXT NOT NULL,
+                    event_hash TEXT NOT NULL,
+                    accepted_at INTEGER NOT NULL,
+                    PRIMARY KEY (actor, event_id)
+                );
             """)
         self.path.chmod(0o600)
 
@@ -66,6 +74,27 @@ class LocalState:
                 return False
         return True
 
+    def accept_event_identity(
+        self, actor: str, event_id: str, payload_digest: str, event_hash: str, *, now: int
+    ) -> str:
+        """Atomically accept one Event Identity.
+
+        Returns "accepted", "already_accepted", or "conflict".
+        """
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT payload_digest FROM accepted_events WHERE actor = ? AND event_id = ?",
+                (actor, event_id),
+            ).fetchone()
+            if row is not None:
+                return "already_accepted" if row[0] == payload_digest else "conflict"
+            db.execute(
+                "INSERT INTO accepted_events(actor,event_id,payload_digest,event_hash,accepted_at) VALUES (?,?,?,?,?)",
+                (actor, event_id, payload_digest, event_hash, now),
+            )
+        return "accepted"
+
     def save_event(self, event_hash: str, event: dict) -> None:
         with self.connect() as db:
             db.execute(
@@ -104,6 +133,14 @@ class PostgresState:
             db.execute("CREATE TABLE IF NOT EXISTS jep_nonces (actor TEXT NOT NULL, audience TEXT NOT NULL, nonce TEXT NOT NULL, expires BIGINT NOT NULL, PRIMARY KEY(actor,audience,nonce))")
             db.execute("CREATE TABLE IF NOT EXISTS jep_events (hash TEXT PRIMARY KEY, payload JSONB NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS jep_public_keys (kid TEXT PRIMARY KEY, payload JSONB NOT NULL)")
+            db.execute("""CREATE TABLE IF NOT EXISTS jep_accepted_events (
+                actor TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                payload_digest TEXT NOT NULL,
+                event_hash TEXT NOT NULL,
+                accepted_at BIGINT NOT NULL,
+                PRIMARY KEY(actor,event_id)
+            )""")
             db.execute("CREATE INDEX IF NOT EXISTS jep_nonces_expiry ON jep_nonces(expires)")
 
     @contextmanager
@@ -115,6 +152,28 @@ class PostgresState:
         with self.connect() as db:
             row = db.execute("INSERT INTO jep_nonces VALUES (%s,%s,%s,%s) ON CONFLICT(actor,audience,nonce) DO UPDATE SET expires=EXCLUDED.expires WHERE jep_nonces.expires < %s RETURNING nonce", (actor,audience,nonce,expires,now)).fetchone()
             return row is not None
+
+    def accept_event_identity(
+        self, actor: str, event_id: str, payload_digest: str, event_hash: str, *, now: int
+    ) -> str:
+        """Atomically accept one Event Identity across API workers."""
+        with self.connect() as db:
+            row = db.execute(
+                """INSERT INTO jep_accepted_events(actor,event_id,payload_digest,event_hash,accepted_at)
+                   VALUES (%s,%s,%s,%s,%s)
+                   ON CONFLICT(actor,event_id) DO NOTHING
+                   RETURNING payload_digest""",
+                (actor,event_id,payload_digest,event_hash,now),
+            ).fetchone()
+            if row is not None:
+                return "accepted"
+            existing = db.execute(
+                "SELECT payload_digest FROM jep_accepted_events WHERE actor=%s AND event_id=%s",
+                (actor,event_id),
+            ).fetchone()
+            if existing is None:
+                raise self.driver.Error("acceptance state disappeared during transaction")
+            return "already_accepted" if existing[0] == payload_digest else "conflict"
 
     def save_event(self, event_hash: str, event: dict) -> None:
         with self.connect() as db:

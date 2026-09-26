@@ -1,7 +1,8 @@
-"""JEP v0.6 API seed.
+"""JEP reference API.
 
-This FastAPI service is a small reference API seed for JEP v0.6-style
-event creation and verification.
+The current API contract targets JEP Core 0.7 under /v0.7. Historical
+unversioned endpoints retain pre-0.7 compatibility behavior so existing
+0.6 artifacts are not silently reinterpreted.
 
 Implemented:
 - J/D/T/V event creation
@@ -47,9 +48,11 @@ from pydantic import BaseModel, Field
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 
-JEP_CORE_PROFILE = "jep-core-0.6"
-JEP_WIRE_VERSION = "1"
+JEP_CORE_PROFILE = "jep-core-0.6"  # legacy unversioned endpoint compatibility
 JEP_CONFORMANCE_CLASS = "JEP-Baseline-Ed25519-JWS-JCS-0.6"
+JEP_CORE_PROFILE_07 = "jep-core-0.7"
+JEP_CONFORMANCE_CLASS_07 = "JEP-Baseline-Ed25519-JWS-JCS-0.7"
+JEP_WIRE_VERSION = "1"
 
 EXT_TTL = "https://jep.org/ttl"
 EXT_DIGEST_ONLY = "https://jep.org/priv/digest-only"
@@ -65,6 +68,10 @@ MAX_AGE_SECONDS = 300
 CLOCK_SKEW_SECONDS = 30
 SCHEMA = Draft202012Validator(
     json.loads(Path(__file__).with_name("jep-event.schema.json").read_text()),
+    format_checker=FormatChecker(),
+)
+SCHEMA_07 = Draft202012Validator(
+    json.loads(Path(__file__).with_name("jep-event-0.7.schema.json").read_text()),
     format_checker=FormatChecker(),
 )
 
@@ -219,6 +226,26 @@ class VerifyEventRequest(BaseModel):
     expected_audience: Optional[str] = None
 
 
+class CreateEvent07Request(BaseModel):
+    id: Optional[str] = Field(default=None, min_length=1)
+    verb: str = Field(..., pattern="^(J|D|T|V)$")
+    who: str = Field(default=DEMO_WHO, min_length=1)
+    what: Any
+    aud: Optional[str] = None
+    ref: str | Dict[str, Any] | None = None
+    ttl_minutes: Optional[int] = Field(default=None, gt=0, strict=True)
+    digest_only_who: bool = False
+    ext: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    ext_crit: List[str] = Field(default_factory=list)
+
+
+class VerifyEvent07Request(BaseModel):
+    event: Dict[str, Any]
+    mode: Literal["archival", "acceptance"] = "archival"
+    expected_audience: Optional[str] = None
+    max_age_seconds: Optional[int] = Field(default=None, ge=0, strict=True)
+
+
 class EventResponse(BaseModel):
     event: Dict[str, Any]
     event_hash: str
@@ -226,28 +253,36 @@ class EventResponse(BaseModel):
 
 
 app = FastAPI(
-    title="JEP v0.6 API Seed",
+    title="JEP Core 0.7 Reference API",
     version=VERSION,
-    description="FastAPI seed for JEP v0.6 event creation and verification.",
+    description="Reference API for JEP Core 0.7 with explicit pre-0.7 compatibility endpoints.",
 )
 
 
 @app.middleware("http")
 async def reject_ambiguous_json(request: Request, call_next):
     payload = None
-    if request.method == "POST" and request.url.path in {"/events/create", "/events/verify", "/events/verify-legacy"}:
+    if request.method == "POST" and request.url.path in {"/events/create", "/events/verify", "/events/verify-legacy", "/v0.7/events/create", "/v0.7/events/verify"}:
         try:
             payload = json.loads((await request.body()).decode("utf-8"), object_pairs_hook=strict_object, parse_constant=reject_constant)
         except (ValueError, UnicodeError) as exc:
-            if request.url.path == "/events/verify":
+            if request.url.path in {"/events/verify", "/v0.7/events/verify"}:
                 code = "ERR_DUPLICATE_MEMBER" if isinstance(exc, DuplicateMember) else "ERR_INVALID_JSON"
-                # No event/mode can be trusted after strict JSON parsing fails.
-                result = validation_result(False, 0, "unparsed", errors=[error(code, str(exc))])
+                if request.url.path == "/v0.7/events/verify":
+                    checks = _checks_07()
+                    checks["syntax"] = "fail"
+                    result = validation_result_07(
+                        "invalid", "archival", checks=checks,
+                        errors=[error_07(code, str(exc), "syntax")],
+                    )
+                else:
+                    # No event/mode can be trusted after strict JSON parsing fails.
+                    result = validation_result(False, 0, "unparsed", errors=[error(code, str(exc))])
                 result["detail"] = str(exc)
                 return JSONResponse(status_code=400, content=result)
             return JSONResponse(status_code=400, content={"detail": str(exc)})
-    mutates_state = request.url.path == "/events/create" or (
-        request.url.path == "/events/verify" and isinstance(payload, dict)
+    mutates_state = request.url.path in {"/events/create", "/v0.7/events/create"} or (
+        request.url.path in {"/events/verify", "/v0.7/events/verify"} and isinstance(payload, dict)
         and (payload.get("mode") == "acceptance" or bool(payload.get("consume_nonce")))
     )
     if request.method == "POST" and mutates_state and os.environ.get("JEP_SIGNING_TOKEN_FILE"):
@@ -268,14 +303,15 @@ def root() -> Dict[str, Any]:
     except (KeyUnavailable, *STORAGE_ERRORS):
         raise HTTPException(status_code=503, detail="Signing or shared state unavailable")
     return {
-        "name": "JEP v0.6 API Seed",
-        "profile": JEP_CORE_PROFILE,
+        "name": "JEP Core 0.7 Reference API",
+        "profile": JEP_CORE_PROFILE_07,
         "wire_format": JEP_WIRE_VERSION,
         "version": VERSION,
         "revision": os.environ.get("JEP_REVISION", "development"),
         "public_key": current_key,
         "jwks_uri": "/.well-known/jwks.json",
-        "endpoints": ["/health", "/events/create", "/events/verify"],
+        "endpoints": ["/health", "/v0.7/events/create", "/v0.7/events/verify"],
+        "legacy_endpoints": ["/events/create", "/events/verify", "/events/verify-legacy"],
     }
 
 
@@ -286,7 +322,7 @@ def health() -> Dict[str, Any]:
         KEYS.snapshot()
     except (KeyUnavailable, *STORAGE_ERRORS):
         raise HTTPException(status_code=503, detail="Signing or shared state unavailable")
-    return {"ok": True, "profile": JEP_CORE_PROFILE, "version": VERSION, "revision": os.environ.get("JEP_REVISION", "development")}
+    return {"ok": True, "profile": JEP_CORE_PROFILE_07, "version": VERSION, "revision": os.environ.get("JEP_REVISION", "development")}
 
 
 @app.get("/.well-known/jwks.json")
@@ -297,6 +333,260 @@ def jwks():
 @app.get("/live")
 def live():
     return {"ok": True, "version": VERSION}
+
+
+
+def error_07(code: str, message: str, check: str, recoverable: bool = False) -> Dict[str, Any]:
+    return {"code": code, "message": message, "check": check, "recoverable": recoverable}
+
+
+def _safe_event_hash_07(event: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not event or "sig" not in event:
+        return None
+    try:
+        return event_hash(event)
+    except Exception:
+        return None
+
+
+def validation_result_07(
+    status: str,
+    mode: str,
+    event: Optional[Dict[str, Any]] = None,
+    *,
+    checks: Optional[Dict[str, str]] = None,
+    errors: Optional[List[Dict[str, Any]]] = None,
+    warnings: Optional[List[Dict[str, Any]]] = None,
+    acceptance: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    result = {
+        "status": status,
+        "mode": mode,
+        "profile": JEP_CORE_PROFILE_07,
+        "conformance_class": JEP_CONFORMANCE_CLASS_07,
+        "event_identity": (
+            {"who": event["who"], "id": event["id"]}
+            if event and isinstance(event.get("who"), str) and isinstance(event.get("id"), str)
+            else None
+        ),
+        "event_hash": _safe_event_hash_07(event),
+        "checks": checks or {},
+        "warnings": warnings or [],
+        "errors": errors or [],
+    }
+    if acceptance is not None:
+        result["acceptance"] = acceptance
+    return result
+
+
+def schema_error_code_07(event, problem):
+    if problem.validator == "required":
+        if isinstance(event, dict) and "sig" not in event and problem.message == "'sig' is a required property":
+            return "ERR_SIGNATURE_MISSING"
+        return "ERR_MISSING_REQUIRED_FIELD"
+    path = list(problem.absolute_path)
+    if path == ["jep"] and problem.validator == "const":
+        return "ERR_UNSUPPORTED_JEP_VERSION"
+    if path == ["id"]:
+        return "ERR_EVENT_ID_INVALID"
+    if path == ["verb"] and problem.validator == "enum":
+        return "ERR_UNKNOWN_VERB"
+    if path == ["when"]:
+        return "ERR_INVALID_TIMESTAMP"
+    if path == ["sig"]:
+        return "ERR_SIGNATURE_CONTAINER_INVALID"
+    pending = list(problem.context)
+    while pending:
+        child = pending.pop(0)
+        if child.validator == "required":
+            return "ERR_MISSING_REQUIRED_FIELD"
+        pending.extend(child.context)
+    return "ERR_INVALID_FIELD_TYPE"
+
+
+def _checks_07() -> Dict[str, str]:
+    return {
+        "syntax": "not_checked",
+        "cryptographic": "not_checked",
+        "actor_binding": "not_checked",
+        "freshness": "not_checked",
+        "audience": "not_checked",
+        "event_identity": "not_checked",
+        "reference_integrity": "not_checked",
+        "extension_processing": "not_checked",
+        "chain_integrity": "not_checked",
+        "policy": "not_checked",
+    }
+
+
+def validate_event_07(
+    event: Dict[str, Any],
+    mode: str = "archival",
+    expected_audience: Optional[str] = None,
+    max_age_seconds: Optional[int] = None,
+) -> Dict[str, Any]:
+    checks = _checks_07()
+
+    def fail(code: str, message: str, check: str, *, indeterminate: bool = False):
+        checks[check] = "indeterminate" if indeterminate else "fail"
+        status = "indeterminate" if indeterminate else "invalid"
+        acceptance = None
+        if mode == "acceptance":
+            acceptance = {
+                "outcome": "indeterminate" if indeterminate else "rejected",
+                "effect_applied": False,
+            }
+        return validation_result_07(
+            status, mode, event,
+            checks=checks,
+            errors=[error_07(code, message, check)],
+            acceptance=acceptance,
+        )
+
+    if mode not in {"archival", "acceptance"}:
+        return fail("ERR_INVALID_MODE", "mode must be archival or acceptance", "syntax")
+
+    try:
+        jcs_seed(event)
+        problem = next(SCHEMA_07.iter_errors(event), None)
+    except (ValueError, TypeError) as exc:
+        return fail("ERR_INVALID_JSON", str(exc), "syntax")
+    if problem:
+        return fail(schema_error_code_07(event, problem), problem.message, "syntax")
+    if type(event.get("when")) is not int:
+        return fail("ERR_INVALID_TIMESTAMP", "when must be an integer Unix timestamp", "syntax")
+    checks["syntax"] = "pass"
+
+    ok, sig_error = detached_jws_verify(event)
+    if not ok:
+        checks["cryptographic"] = "fail"
+        return validation_result_07(
+            "invalid", mode, event, checks=checks,
+            errors=[error_07(sig_error["code"], sig_error["message"], "cryptographic")],
+            acceptance={"outcome": "rejected", "effect_applied": False} if mode == "acceptance" else None,
+        )
+    checks["cryptographic"] = "pass"
+    checks["event_identity"] = "pass"
+
+    ext = event.get("ext", {})
+    for ext_id in event.get("ext_crit", []):
+        if ext_id not in ext:
+            return fail("ERR_EXTENSION_SCHEMA_INVALID", f"Missing critical extension: {ext_id}", "extension_processing")
+        if ext_id not in KNOWN_EXTENSIONS:
+            return fail("ERR_UNKNOWN_CRITICAL_EXTENSION", f"Unsupported critical extension: {ext_id}", "extension_processing")
+    checks["extension_processing"] = "pass"
+
+    if "ref" not in event:
+        checks["reference_integrity"] = "not_applicable"
+
+    if expected_audience is not None:
+        if event.get("aud") != expected_audience:
+            return fail("ERR_DOMAIN_REQUIREMENT_UNSATISFIED", "Audience mismatch", "audience")
+        checks["audience"] = "pass"
+
+    if max_age_seconds is not None:
+        now = int(time.time())
+        if event["when"] < now - max_age_seconds:
+            return fail("ERR_EVENT_EXPIRED", "Event is older than the requested freshness window", "freshness")
+        if event["when"] > now + CLOCK_SKEW_SECONDS:
+            return fail("ERR_TIMESTAMP_OUT_OF_WINDOW", "Event timestamp is too far in the future", "freshness")
+        checks["freshness"] = "pass"
+
+    if mode == "archival":
+        return validation_result_07("valid", mode, event, checks=checks)
+
+    unsigned = {k: v for k, v in event.items() if k != "sig"}
+    payload_digest = sha256_digest(jcs_seed(unsigned))
+    try:
+        outcome = STATE.accept_event_identity(
+            event["who"], event["id"], payload_digest, event_hash(event), now=int(time.time())
+        )
+    except STORAGE_ERRORS:
+        return fail(
+            "ERR_ACCEPTANCE_STATE_UNAVAILABLE",
+            "Acceptance state is unavailable",
+            "event_identity",
+            indeterminate=True,
+        )
+
+    if outcome == "conflict":
+        return fail("ERR_EVENT_ID_CONFLICT", "Event Identity was already bound to different unsigned content", "event_identity")
+    if outcome == "already_accepted":
+        return validation_result_07(
+            "valid", mode, event, checks=checks,
+            acceptance={"outcome": "already_accepted", "effect_applied": False},
+        )
+    return validation_result_07(
+        "valid", mode, event, checks=checks,
+        acceptance={"outcome": "accepted", "effect_applied": True},
+    )
+
+
+@app.post("/v0.7/events/create", response_model=EventResponse)
+def create_event_07(req: CreateEvent07Request) -> Dict[str, Any]:
+    now = int(time.time())
+    who = req.who
+    ext = deepcopy(req.ext or {})
+    ext_crit = list(req.ext_crit or [])
+
+    if req.digest_only_who:
+        salt = b64u(hashlib.sha256(str(uuid.uuid4()).encode()).digest()[:16])
+        who_digest = sha256_digest(f"{who}:{salt}".encode("utf-8"))
+        who = who_digest
+        ext.setdefault(EXT_DIGEST_ONLY, {})["who_digest"] = who_digest
+        ext[EXT_DIGEST_ONLY]["salt_hint"] = "not disclosed"
+        if EXT_DIGEST_ONLY not in ext_crit:
+            ext_crit.append(EXT_DIGEST_ONLY)
+
+    if req.ttl_minutes is not None:
+        ext.setdefault(EXT_TTL, {})["ttl_minutes"] = req.ttl_minutes
+        ext[EXT_TTL]["expires_at"] = now + req.ttl_minutes * 60
+        if EXT_TTL not in ext_crit:
+            ext_crit.append(EXT_TTL)
+
+    event = {
+        "jep": JEP_WIRE_VERSION,
+        "id": req.id or f"urn:uuid:{uuid.uuid4()}",
+        "verb": req.verb,
+        "who": who,
+        "when": now,
+        "what": req.what,
+    }
+    if req.aud is not None:
+        event["aud"] = req.aud
+    if req.ref is not None:
+        event["ref"] = req.ref
+    if ext:
+        event["ext"] = ext
+    if ext_crit:
+        event["ext_crit"] = ext_crit
+
+    try:
+        event["sig"] = detached_jws_sign(event)
+    except KeyUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Signing provider unavailable") from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    result = validate_event_07(event, mode="archival")
+    if result["status"] != "valid":
+        raise HTTPException(status_code=422, detail=result)
+    h = event_hash(event)
+    try:
+        STATE.save_event(h, event)
+    except STORAGE_ERRORS as exc:
+        raise HTTPException(status_code=503, detail="Event storage is unavailable") from exc
+    return {"event": event, "event_hash": h, "validation": result}
+
+
+@app.post("/v0.7/events/verify")
+def verify_event_07(req: VerifyEvent07Request) -> Dict[str, Any]:
+    return validate_event_07(
+        req.event,
+        mode=req.mode,
+        expected_audience=req.expected_audience,
+        max_age_seconds=req.max_age_seconds,
+    )
 
 
 @app.post("/events/create", response_model=EventResponse)
