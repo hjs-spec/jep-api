@@ -92,17 +92,21 @@ def b64u_decode(data: str) -> bytes:
 
 
 def _binary64_numbers(value):
-    """Adapt exactly representable Python integers to the JCS binary64 domain.
+    """Adapt integer tokens to their preserved JCS binary64 value.
 
     JSON.stringify(1e20) emits an integer token. Parsing that token into a
-    Python int must not invalidate the same JCS number or silently round a
-    genuinely higher-precision integer. This returns a copy, never edits input.
+    Python int must not invalidate that number. Accept an exact binary64
+    integer or its canonical shortest decimal spelling, which can differ
+    (1000000000000000100 represents the float 1000000000000000128).
+    Other precision-losing integers remain rejected. Never edit the input.
     """
     if type(value) is int and abs(value) > 2**53 - 1:
         try:
             number = float(value)
-            if not math.isfinite(number) or int(number) != value:
-                raise ValueError("Integer cannot be represented exactly as binary64")
+            if not math.isfinite(number):
+                raise ValueError("Integer exceeds binary64 range")
+            if int(number) != value and rfc8785.dumps(number) != str(value).encode("ascii"):
+                raise ValueError("Integer is neither exact binary64 nor its canonical JCS spelling")
         except OverflowError as exc:
             raise ValueError("Integer exceeds binary64 range") from exc
         return number
