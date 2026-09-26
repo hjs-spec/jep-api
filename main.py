@@ -4,18 +4,18 @@ The current API contract targets JEP Core 0.7 under /v0.7. Historical
 unversioned endpoints retain pre-0.7 compatibility behavior so existing
 0.6 artifacts are not silently reinterpreted.
 
-Implemented:
-- J/D/T/V event creation
-- JEP wire version "1"
-- JEP-Core-0.6 profile labels
-- JCS-compatible seed canonicalization
-- algorithm-tagged event hash
-- detached JWS Compact Serialization shape
-- Ed25519 signing and verification
+Current 0.7 path:
+- J/D/T/V event creation with stable Event Identity (who,id)
+- JEP wire version "1" with JEP-Core-0.7 profile labels
+- JCS canonicalization and algorithm-tagged Event Hash
+- detached JWS baseline signing and verification
+- independent validation checks and structured valid/invalid/indeterminate results
+- idempotent acceptance outcomes including already_accepted
 - ext/ext_crit extension framework
-- TTL and digest-only privacy extensions
-- JEP-style validation result object
-- replay cache separation for verification consumption
+
+Legacy unversioned endpoints retain explicit pre-0.7 compatibility, including
+historical nonce/replay behavior. Legacy decoding is never selected by
+heuristic fallback after a 0.7 failure.
 
 This is an implementation seed, not a production security service.
 """
