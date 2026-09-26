@@ -1,3 +1,5 @@
+> Historical **Core 0.6** hardening record. Current Core 0.7 acceptance uses Event Identity, not mandatory nonce/audience checks. Use [README](README.md) and [deployment](DEPLOYMENT.md) for current behavior.
+
 # Implementation hardening — September 2026
 
 Prevent false acceptance, replay-cache poisoning and digest-only identity leakage.

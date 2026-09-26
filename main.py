@@ -60,7 +60,7 @@ KNOWN_EXTENSIONS = {EXT_TTL, EXT_DIGEST_ONLY}
 
 STATE = configured_state()
 KEYS = KeyManager(STATE)
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 STORAGE_ERRORS = (sqlite3.Error, psycopg.Error)
 if os.environ.get("JEP_DEPLOYMENT_MODE") == "production" and not os.environ.get("JEP_SIGNING_TOKEN_FILE"):
     raise ValueError("Production signing requires JEP_SIGNING_TOKEN_FILE")

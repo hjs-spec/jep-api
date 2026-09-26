@@ -1,14 +1,16 @@
-# JEP-Core-0.6 API deployment and compatibility
+# API deployment and compatibility
 
-Wire version remains `1` / JEP-Core-0.6. No business semantics were added.
+Current protocol profile: **JEP Core 0.7**, wire major `jep: "1"`. The software version in `VERSION` is independent of the protocol. Current routes are `/v0.7/events/*`; unversioned routes preserve explicit pre-0.7 behavior.
 
-Live deployment is currently deferred by the owner; the current scope is updating the repository implementation. The implementation version `0.7.3` is independent of the JEP-Core-0.6 protocol profile. The instructions below are for a future deployment. `check-hf.yml` and `deploy.yml` run only when manually dispatched on `main`; code changes and releases do not trigger them.
+`check-hf.yml` is manual and reads configuration metadata only. `deploy.yml` runs manually on `main` or after a successful **Publish versioned release** workflow, using that release's revision. Ordinary documentation/code merges without a new release do not deploy. Every upload is gated on production configuration and a matching live health/revision check.
+
+Source release, GHCR image and live Space are separate delivery results. Consult the dated [delivery record](https://github.com/hjs-spec/.github/blob/main/DELIVERY-2026-09-26.md); configuration failure is not a successful deployment.
 
 ## Multiple hosts
 
-All API replicas use the same PostgreSQL database (`JEP_DATABASE_URL` or `JEP_DATABASE_URL_FILE`). Unique constraints and transactional upserts consume each actor/audience/nonce once across replicas. PostgreSQL must be private, durable, backed up and configured with TLS (`sslmode=verify-full` for remote connections). Hosts require synchronized clocks. The application connection timeout and statement/lock timeouts are bounded at 10 seconds. A database outage fails verification closed.
+All API replicas use the same PostgreSQL database (`JEP_DATABASE_URL` or `JEP_DATABASE_URL_FILE`). Core 0.7 stores acceptance by `(who,id)`: identical unsigned content returns `already_accepted`, while conflicting content is rejected. Unique constraints and transactions serialize this decision across replicas. The legacy path separately tracks actor/audience/nonce expiry. PostgreSQL must be private, durable, backed up and configured with TLS (`sslmode=verify-full` for remote connections). Hosts require synchronized clocks. The application connection timeout and statement/lock timeouts are bounded at 10 seconds. A database outage fails verification closed.
 
-Use `JEP_DEPLOYMENT_MODE=production`. Startup then requires PostgreSQL, an external signing provider and `JEP_SIGNING_TOKEN_FILE`. `POST /events/create` and verification requests that consume a nonce (acceptance mode or explicit `consume_nonce`) require that Bearer token. Archival verification without consumption stays read-only and public. This prevents anonymous callers from consuming a published event before its intended receiver. This authenticates access to the signer; it does not certify a caller's claimed `who` identity. Ingress must provide TLS. Do not expose the signing endpoint to anonymous internet callers.
+Use `JEP_DEPLOYMENT_MODE=production`. Startup then requires PostgreSQL, an external signing provider and `JEP_SIGNING_TOKEN_FILE`. Creation on both current and legacy routes, current acceptance verification, and legacy requests that consume a nonce require that Bearer token. Archival verification without consumption stays read-only and public. This prevents anonymous callers from changing acceptance/replay state. This authenticates access to the signer; it does not certify a caller's claimed `who` identity. Ingress must provide TLS. Do not expose the signing endpoint to anonymous internet callers.
 
 `deploy/compose.yml` accepts existing secret files and a deployed commit SHA. Bind-mounted files must be readable by UID 1000; the private keyring must have mode 0400 or 0600. Compose file secret mode settings do not replace the host file's ownership/mode. Use an existing PostgreSQL service and your load balancer; scale API replicas without sharing a local volume. `/live` is liveness; `/health` checks state and signing configuration. Metadata includes version/revision. JWKS are at `/.well-known/jwks.json`.
 
@@ -25,8 +27,8 @@ Public key history is retained in PostgreSQL across rotations, so an old signatu
 
 1. Pause API writes and acceptance consumers. Back up the complete existing state directory.
 2. Run `python manage.py export-key /existing/state /private/keyring.json` to retain the current signing identity. This refuses to overwrite files or invent a missing historical key.
-3. Run `python manage.py migrate-postgres /existing/state --database-url-file /private/database-url`. It copies events, trusted public keys and nonce expiries transactionally. It preserves the greatest expiry on retries; it never copies private keys into PostgreSQL.
-4. Configure PostgreSQL, keyring and signing authentication on the replicas. Check health, an archived signature and rejection of a previously consumed nonce before reopening traffic. Do not fall back to the old SQLite snapshot after PostgreSQL accepts new events.
+3. Run `python manage.py migrate-postgres /existing/state --database-url-file /private/database-url`. It copies events, trusted public keys, legacy nonce expiries and Core 0.7 Event Identity acceptance records transactionally. It preserves nonce expiries and prior acceptance decisions on retry. A conflicting accepted identity aborts and rolls back the import; resolve the conflict before switching traffic. Historical databases without a 0.7 acceptance table remain supported. Private keys never enter PostgreSQL.
+4. Configure PostgreSQL, keyring and signing authentication on the replicas. Check health, an archived signature, `already_accepted` for a previously accepted 0.7 event, identity-conflict rejection and rejection of a previously consumed legacy nonce before reopening traffic. Do not fall back to the old SQLite snapshot after PostgreSQL accepts new events.
 
 ## Historical formats
 

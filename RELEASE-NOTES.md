@@ -1,12 +1,11 @@
-# Release 0.8.0
+# Release 0.8.1
 
-This software release publishes the JEP Core 0.7 API migration. Software version 0.8.0 does not introduce a Core 0.8 protocol.
+Preserve Core 0.7 acceptance decisions when moving from SQLite to PostgreSQL.
 
-- Current `/v0.7/events/*` endpoints use stable Event Identity `(who,id)`, independent checks and idempotent acceptance.
-- Unresolved verification keys return indeterminate without consuming acceptance state.
-- The current schema follows the repaired Core 0.7 reference schema, including ASCII identifiers and digest constraints.
-- Recognized TTL and digest-only extensions are validated; expired TTL blocks live acceptance without preventing archival verification.
-- Docker and Hugging Face packages include both current and explicit legacy schemas. Container startup, health, version and revision are checked before registry upload.
-- Unversioned pre-0.7 endpoints and historical decoders remain explicit. There is no automatic legacy fallback.
+- Migration now copies accepted Event Identities, payload digests, original artifact hashes and acceptance times in the same transaction as other state.
+- Repeating migration keeps existing matching decisions. An identity already accepted with different content aborts and rolls back the import.
+- Historical databases without the 0.7 acceptance table remain supported.
+- Real PostgreSQL regression tests cover retry, conflict, rollback and legacy migration.
+- Deployment documentation now describes current `/v0.7` routes, release-triggered deployment and separate source/container/live delivery status.
 
-The service is an experimental reference implementation. Live Hugging Face deployment requires the existing production storage/signing configuration and is verified separately from source/container release.
+Software 0.8.1 still implements Core 0.7. Published protocol artifacts and historical signed events are unchanged. Live deployment still requires the configured production database and signing provider.

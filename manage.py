@@ -3,7 +3,7 @@ import argparse, json, os, sqlite3
 from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from keys import public, b64
-from state import LocalState, PostgresState
+from state import PostgresState
 
 def write_private(path, value):
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
@@ -30,6 +30,25 @@ def migrate(directory,dsn):
             db.execute("INSERT INTO jep_nonces VALUES (%s,%s,%s,%s) ON CONFLICT(actor,audience,nonce) DO UPDATE SET expires=GREATEST(jep_nonces.expires,EXCLUDED.expires)",(actor,audience,nonce,expires))
         for h,payload in old.execute("SELECT hash,payload FROM events"):
             db.execute("INSERT INTO jep_events VALUES (%s,%s::jsonb) ON CONFLICT DO NOTHING",(h,payload))
+        if "accepted_events" in tables:
+            for actor,event_id,digest,event_hash,accepted_at in old.execute(
+                "SELECT actor,event_id,payload_digest,event_hash,accepted_at FROM accepted_events"
+            ):
+                db.execute(
+                    """INSERT INTO jep_accepted_events
+                       (actor,event_id,payload_digest,event_hash,accepted_at)
+                       VALUES (%s,%s,%s,%s,%s)
+                       ON CONFLICT(actor,event_id) DO NOTHING""",
+                    (actor,event_id,digest,event_hash,accepted_at),
+                )
+                existing=db.execute(
+                    "SELECT payload_digest FROM jep_accepted_events WHERE actor=%s AND event_id=%s",
+                    (actor,event_id),
+                ).fetchone()
+                # An identity already accepted with different content cannot be
+                # reconciled by choosing a database. Roll back the whole import.
+                if existing is None or existing[0]!=digest:
+                    raise ValueError("Accepted Event Identity conflict; migration rolled back")
         records=dict(old.execute("SELECT kid,payload FROM public_keys")) if "public_keys" in tables else {}
         row=old.execute("SELECT seed FROM signing_keys WHERE id='default'").fetchone()
         if row:
