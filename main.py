@@ -28,6 +28,7 @@ import sqlite3
 import re
 import hashlib
 import json
+import math
 import time
 import uuid
 from copy import deepcopy
@@ -90,9 +91,31 @@ def b64u_decode(data: str) -> bytes:
     return raw
 
 
+def _binary64_numbers(value):
+    """Adapt exactly representable Python integers to the JCS binary64 domain.
+
+    JSON.stringify(1e20) emits an integer token. Parsing that token into a
+    Python int must not invalidate the same JCS number or silently round a
+    genuinely higher-precision integer. This returns a copy, never edits input.
+    """
+    if type(value) is int and abs(value) > 2**53 - 1:
+        try:
+            number = float(value)
+            if not math.isfinite(number) or int(number) != value:
+                raise ValueError("Integer cannot be represented exactly as binary64")
+        except OverflowError as exc:
+            raise ValueError("Integer exceeds binary64 range") from exc
+        return number
+    if isinstance(value, dict):
+        return {key: _binary64_numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_binary64_numbers(item) for item in value]
+    return value
+
+
 def jcs_seed(obj: Any) -> bytes:
     """RFC 8785 canonicalization; rejects non-I-JSON values."""
-    return rfc8785.dumps(obj)
+    return rfc8785.dumps(_binary64_numbers(obj))
 
 
 class DuplicateMember(ValueError):
@@ -366,7 +389,8 @@ def validation_result_07(
         "conformance_class": JEP_CONFORMANCE_CLASS_07,
         "event_identity": (
             {"who": event["who"], "id": event["id"]}
-            if event and isinstance(event.get("who"), str) and isinstance(event.get("id"), str)
+            if (isinstance(event, dict) and isinstance(event.get("who"), str) and event["who"]
+                and isinstance(event.get("id"), str) and event["id"] and event["id"].isascii())
             else None
         ),
         "event_hash": _safe_event_hash_07(event),

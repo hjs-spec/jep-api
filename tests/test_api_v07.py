@@ -133,3 +133,37 @@ def test_known_extensions_are_validated_before_acceptance():
         result = main.validate_event_07(event, mode="acceptance")
         assert result["checks"]["extension_processing"] == "fail"
         assert result["acceptance"]["effect_applied"] is False
+
+
+def test_malformed_identity_diagnostics_follow_result_schema():
+    import json
+    from pathlib import Path
+    from jsonschema import Draft202012Validator
+
+    schema = Draft202012Validator(json.loads((Path(main.__file__).parent / "jep-validation-result-0.7.schema.json").read_text()))
+    base = create()["event"]
+    for event in ({}, {**base, "id": 3}, {**base, "id": ""}, {**base, "who": ""}, {**base, "who": []}):
+        response = client.post("/v0.7/events/verify", json={"event": event, "mode": "acceptance"})
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == "invalid"
+        assert result["event_identity"] is None
+        schema.validate(result)
+        assert result["acceptance"]["effect_applied"] is False
+    result = client.post("/v0.7/events/verify", json={"event": base, "mode": "acceptance"}).json()
+    assert result["acceptance"] == {"outcome": "accepted", "effect_applied": True}
+
+
+def test_large_jcs_number_survives_javascript_integer_spelling():
+    import json
+
+    original = create(what={"value": 1e20})
+    wire = json.dumps(original["event"]).replace('1e+20', '100000000000000000000')
+    response = client.post('/v0.7/events/verify', content='{"event":'+wire+'}', headers={"content-type":"application/json"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "valid"
+    assert response.json()["event_hash"] == original["event_hash"]
+    for value in (2**53 + 1, 10**400):
+        event = {**original["event"], "what":{"value":value}}
+        result = client.post('/v0.7/events/verify', json={"event":event}).json()
+        assert result["status"] == "invalid"

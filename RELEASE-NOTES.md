@@ -1,11 +1,11 @@
-# Release 0.8.1
+# Release 0.8.2
 
-Preserve Core 0.7 acceptance decisions when moving from SQLite to PostgreSQL.
+- Preserve JCS signatures when exactly representable large numbers arrive in integer-token form after JavaScript serialization (for example `1e20`). Reject precision-losing integers and keep `when` within its existing interoperable integer range.
 
-- Migration now copies accepted Event Identities, payload digests, original artifact hashes and acceptance times in the same transaction as other state.
-- Repeating migration keeps existing matching decisions. An identity already accepted with different content aborts and rolls back the import.
-- Historical databases without the 0.7 acceptance table remain supported.
-- Real PostgreSQL regression tests cover retry, conflict, rollback and legacy migration.
-- Deployment documentation now describes current `/v0.7` routes, release-triggered deployment and separate source/container/live delivery status.
+Malformed `who` or `id` values were correctly rejected, but some rejection responses copied empty identity members into `event_identity`, violating the advertised result schema.
 
-Software 0.8.1 still implements Core 0.7. Published protocol artifacts and historical signed events are unchanged. Live deployment still requires the configured production database and signing provider.
+- Return `event_identity: null` when no well-formed Event Identity is available.
+- Validate invalid-event diagnostics against the result schema and verify rejection leaves acceptance state unused.
+- Retain the transactional SQLite-to-PostgreSQL acceptance migration repair from 0.8.1.
+
+Software 0.8.2 still implements Core 0.7. Published protocol artifacts and historical signed events are unchanged. Live deployment requires the configured production database and signing provider.
