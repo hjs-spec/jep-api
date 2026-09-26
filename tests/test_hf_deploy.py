@@ -72,6 +72,8 @@ def test_deployment_upload_contains_current_schema(monkeypatch):
         folder = Path(kwargs["folder_path"])
         assert (folder / "jep-event-0.7.schema.json").read_bytes() == (root / "jep-event-0.7.schema.json").read_bytes()
         assert "jep-event-0.7.schema.json" in (folder / "Dockerfile").read_text()
+        assert (folder / "VERSION").read_bytes() == (root / "VERSION").read_bytes()
+        assert "VERSION" in (folder / "Dockerfile").read_text()
         captured.append(True)
     api = SimpleNamespace(
         get_space_variables=lambda space: {"JEP_DEPLOYMENT_MODE": SimpleNamespace(value="production")},
