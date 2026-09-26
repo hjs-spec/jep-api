@@ -157,13 +157,13 @@ def test_malformed_identity_diagnostics_follow_result_schema():
 def test_large_jcs_number_survives_javascript_integer_spelling():
     import json
 
-    original = create(what={"value": 1e20})
-    wire = json.dumps(original["event"]).replace('1e+20', '100000000000000000000')
+    original = create(what={"value": 1e20, "shortest": 1.0000000000000001e18, "negative": -1.0000000000000001e18})
+    wire = json.dumps(original["event"]).replace('1e+20', '100000000000000000000').replace('1.0000000000000001e+18', '1000000000000000100')
     response = client.post('/v0.7/events/verify', content='{"event":'+wire+'}', headers={"content-type":"application/json"})
     assert response.status_code == 200
     assert response.json()["status"] == "valid"
     assert response.json()["event_hash"] == original["event_hash"]
-    for value in (2**53 + 1, 10**400):
+    for value in (2**53 + 1, 1000000000000000101, 10**400):
         event = {**original["event"], "what":{"value":value}}
         result = client.post('/v0.7/events/verify', json={"event":event}).json()
         assert result["status"] == "invalid"
