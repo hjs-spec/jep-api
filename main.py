@@ -1,7 +1,8 @@
-"""JEP v0.6 API seed.
+"""JEP reference API.
 
-This FastAPI service is a small reference API seed for JEP v0.6-style
-event creation and verification.
+The current API contract targets JEP Core 0.7 under /v0.7. Historical
+unversioned endpoints retain pre-0.7 compatibility behavior so existing
+0.6 artifacts are not silently reinterpreted.
 
 Implemented:
 - J/D/T/V event creation
@@ -265,10 +266,18 @@ async def reject_ambiguous_json(request: Request, call_next):
         try:
             payload = json.loads((await request.body()).decode("utf-8"), object_pairs_hook=strict_object, parse_constant=reject_constant)
         except (ValueError, UnicodeError) as exc:
-            if request.url.path == "/events/verify":
+            if request.url.path in {"/events/verify", "/v0.7/events/verify"}:
                 code = "ERR_DUPLICATE_MEMBER" if isinstance(exc, DuplicateMember) else "ERR_INVALID_JSON"
-                # No event/mode can be trusted after strict JSON parsing fails.
-                result = validation_result(False, 0, "unparsed", errors=[error(code, str(exc))])
+                if request.url.path == "/v0.7/events/verify":
+                    checks = _checks_07()
+                    checks["syntax"] = "fail"
+                    result = validation_result_07(
+                        "invalid", "archival", checks=checks,
+                        errors=[error_07(code, str(exc), "syntax")],
+                    )
+                else:
+                    # No event/mode can be trusted after strict JSON parsing fails.
+                    result = validation_result(False, 0, "unparsed", errors=[error(code, str(exc))])
                 result["detail"] = str(exc)
                 return JSONResponse(status_code=400, content=result)
             return JSONResponse(status_code=400, content={"detail": str(exc)})
@@ -331,6 +340,15 @@ def error_07(code: str, message: str, check: str, recoverable: bool = False) -> 
     return {"code": code, "message": message, "check": check, "recoverable": recoverable}
 
 
+def _safe_event_hash_07(event: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not event or "sig" not in event:
+        return None
+    try:
+        return event_hash(event)
+    except Exception:
+        return None
+
+
 def validation_result_07(
     status: str,
     mode: str,
@@ -351,7 +369,7 @@ def validation_result_07(
             if event and isinstance(event.get("who"), str) and isinstance(event.get("id"), str)
             else None
         ),
-        "event_hash": event_hash(event) if event and "sig" in event else None,
+        "event_hash": _safe_event_hash_07(event),
         "checks": checks or {},
         "warnings": warnings or [],
         "errors": errors or [],
