@@ -5,17 +5,14 @@ unversioned endpoints retain pre-0.7 compatibility behavior so existing
 0.6 artifacts are not silently reinterpreted.
 
 Implemented:
-- J/D/T/V event creation
-- JEP wire version "1"
-- JEP-Core-0.6 profile labels
-- JCS-compatible seed canonicalization
-- algorithm-tagged event hash
-- detached JWS Compact Serialization shape
-- Ed25519 signing and verification
-- ext/ext_crit extension framework
-- TTL and digest-only privacy extensions
-- JEP-style validation result object
-- replay cache separation for verification consumption
+- JEP Core 0.7 J/D/T/V creation and verification under /v0.7
+- stable Event Identity `(who,id)` and exact-artifact Event Hash
+- independent 0.7 validation checks and idempotent acceptance outcomes
+- JEP wire major "1"
+- JCS canonicalization and detached JWS baseline verification
+- ext/ext_crit extension processing
+- explicit historical pre-0.7 compatibility endpoints
+- legacy nonce/replay behavior only on legacy paths
 
 This is an implementation seed, not a production security service.
 """
