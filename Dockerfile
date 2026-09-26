@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && useradd --create-home --uid 1000 jep
-COPY --chown=jep:jep main.py state.py keys.py compatibility.py manage.py jep-event.schema.json ./
+COPY --chown=jep:jep main.py state.py keys.py compatibility.py manage.py jep-event.schema.json jep-event-0.7.schema.json ./
 COPY --chown=jep:jep scripts/entrypoint.py ./entrypoint.py
 ARG JEP_REVISION=unknown
 ENV JEP_REVISION=$JEP_REVISION JEP_STATE_DIR=/data/jep PYTHONUNBUFFERED=1

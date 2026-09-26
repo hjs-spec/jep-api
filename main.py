@@ -60,7 +60,7 @@ KNOWN_EXTENSIONS = {EXT_TTL, EXT_DIGEST_ONLY}
 
 STATE = configured_state()
 KEYS = KeyManager(STATE)
-VERSION = "0.7.3"
+VERSION = "0.8.0"
 STORAGE_ERRORS = (sqlite3.Error, psycopg.Error)
 if os.environ.get("JEP_DEPLOYMENT_MODE") == "production" and not os.environ.get("JEP_SIGNING_TOKEN_FILE"):
     raise ValueError("Production signing requires JEP_SIGNING_TOKEN_FILE")
@@ -459,11 +459,9 @@ def validate_event_07(
 
     ok, sig_error = detached_jws_verify(event)
     if not ok:
-        checks["cryptographic"] = "fail"
-        return validation_result_07(
-            "invalid", mode, event, checks=checks,
-            errors=[error_07(sig_error["code"], sig_error["message"], "cryptographic")],
-            acceptance={"outcome": "rejected", "effect_applied": False} if mode == "acceptance" else None,
+        return fail(
+            sig_error["code"], sig_error["message"], "cryptographic",
+            indeterminate=sig_error["code"] == "ERR_KEY_UNRESOLVED",
         )
     checks["cryptographic"] = "pass"
     checks["event_identity"] = "pass"
@@ -474,7 +472,20 @@ def validate_event_07(
             return fail("ERR_EXTENSION_SCHEMA_INVALID", f"Missing critical extension: {ext_id}", "extension_processing")
         if ext_id not in KNOWN_EXTENSIONS:
             return fail("ERR_UNKNOWN_CRITICAL_EXTENSION", f"Unsupported critical extension: {ext_id}", "extension_processing")
+    ttl = ext.get(EXT_TTL)
+    if ttl is not None:
+        if type(ttl.get("expires_at")) is not int:
+            return fail("ERR_EXTENSION_INVALID", "TTL expires_at must be integer seconds", "extension_processing")
+        if "ttl_minutes" in ttl and (type(ttl["ttl_minutes"]) is not int or ttl["ttl_minutes"] <= 0):
+            return fail("ERR_EXTENSION_INVALID", "TTL ttl_minutes must be a positive integer", "extension_processing")
+    digest = ext.get(EXT_DIGEST_ONLY)
+    if digest is not None and digest.get("who_digest") != event["who"]:
+        return fail("ERR_EXTENSION_INVALID", "Digest-only who must equal who_digest", "extension_processing")
     checks["extension_processing"] = "pass"
+    if mode == "acceptance" and ttl is not None:
+        if int(time.time()) >= ttl["expires_at"]:
+            return fail("ERR_EVENT_EXPIRED", "Event TTL expired", "freshness")
+        checks["freshness"] = "pass"
 
     if "ref" not in event:
         checks["reference_integrity"] = "not_applicable"
