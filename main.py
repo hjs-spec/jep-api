@@ -162,7 +162,7 @@ def detached_jws_sign(unsigned_event: Dict[str, Any]) -> str:
     return f"{protected_b64}..{b64u(signature)}"
 
 
-def detached_jws_verify(event: Dict[str, Any]) -> tuple[bool, Optional[Dict[str, Any]]]:
+def detached_jws_verify(event: Dict[str, Any], *, strict_current: bool = False) -> tuple[bool, Optional[Dict[str, Any]]]:
     sig = event.get("sig")
     if not isinstance(sig, str) or sig.count(".") != 2:
         return False, error("ERR_SIGNATURE_CONTAINER_INVALID", "sig is not detached JWS Compact Serialization", 1)
@@ -173,6 +173,10 @@ def detached_jws_verify(event: Dict[str, Any]) -> tuple[bool, Optional[Dict[str,
 
     try:
         protected = json.loads(b64u_decode(protected_b64).decode("utf-8"), object_pairs_hook=strict_object, parse_constant=reject_constant)
+        if strict_current:
+            # Validate all decoded values, but verify the original header bytes.
+            # Keep explicitly selected historical parsing behavior unchanged.
+            jcs_seed(protected)
     except Exception as exc:
         return False, error("ERR_SIGNATURE_CONTAINER_INVALID", f"Invalid protected header: {exc}", 1)
 
@@ -485,7 +489,7 @@ def validate_event_07(
         return fail("ERR_INVALID_TIMESTAMP", "when must be an integer Unix timestamp", "syntax")
     checks["syntax"] = "pass"
 
-    ok, sig_error = detached_jws_verify(event)
+    ok, sig_error = detached_jws_verify(event, strict_current=True)
     if not ok:
         return fail(
             sig_error["code"], sig_error["message"], "cryptographic",
