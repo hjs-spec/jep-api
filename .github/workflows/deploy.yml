@@ -1,10 +1,11 @@
-name: Deploy existing Hugging Face API
+name: Deploy existing Hugging Face API (manual opt-in)
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: [Publish versioned release]
-    types: [completed]
-    branches: [main]
+    inputs:
+      confirmation:
+        description: 'Type deploy-hosted-api after approving hosting, costs, state and signing identity'
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -12,12 +13,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'deploy-hosted-api'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -25,4 +28,4 @@ jobs:
       - run: python scripts/deploy_hf.py
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          JEP_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
+          JEP_REVISION: ${{ github.sha }}
