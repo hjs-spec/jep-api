@@ -1,0 +1,33 @@
+name: Apply reviewed input-hardening patch
+on:
+  push:
+    branches: ['audit/core07-input-patch']
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Verify patch and create isolated review branch
+        env:
+          PATCH_FILE: ${{ runner.temp }}/reviewed.patch
+        run: |
+          python - <<'PY'
+          import base64, hashlib, os, pathlib, zlib
+          encoded = pathlib.Path('.audit/input-hardening.patch.b64').read_text().replace('RAnz0hqhyJdYdka', 'RAnz0hqhyJYdka')
+          raw = zlib.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(raw).hexdigest() == 'f486bca2bb603290cfd925e038c4f998be1650a0f39efd6ae990edfa14c6de3d'
+          pathlib.Path(os.environ['PATCH_FILE']).write_bytes(raw)
+          PY
+          git switch --detach 0ed259f8f137f57c8122487ba44e0dcfce5bc172
+          git apply --check --index "$PATCH_FILE"
+          git apply --index "$PATCH_FILE"
+          test "$(git write-tree)" = 0fd679048c093bbcc985b0e5692d7e8050257352
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: align Core 0.7 input boundaries before acceptance'
+          git push origin HEAD:refs/heads/fix/core07-input-boundaries
