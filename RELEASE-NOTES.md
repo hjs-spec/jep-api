@@ -1,3 +1,16 @@
+# Software 0.8.5
+
+Current Core 0.7 verification now rejects empty extension identifiers and digest
+strings with trailing line terminators. The current JWS path validates every
+protected-header JSON value for supported finite numbers and well-formed Unicode,
+while still verifying the original protected bytes (canonical header JSON is not
+required). Explicit historical decoding is unchanged.
+
+Regression tests use real signatures, both archival and acceptance routes, and a
+corrected retry with the same Event Identity. Invalid input must not consume
+acceptance state. Existing stored events and accepted identities are not rewritten
+or reset. The schema copy matches the current Core structural hardening patch.
+
 # Software 0.8.4
 
 Complete the JCS numeric roundtrip repair: accept the canonical shortest decimal spelling of a binary64 number as well as its exact integer value. For example, JavaScript emits `1000000000000000100` for the float whose exact integer value is `1000000000000000128`. Both serialize to the same JCS bytes. Noncanonical precision-losing integers and overflow remain rejected.
