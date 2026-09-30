@@ -169,4 +169,4 @@ Both paths use transactional state updates.
 See [DEPLOYMENT.md](DEPLOYMENT.md) for operational hardening and `compatibility.py` for
 explicit historical integrity verification.
 
-The current structural schema is synchronized with `hjs-spec/jep-core/schemas/jep-event.schema.json`. Its SHA-256 is `d03b607fc7bbb3eb5fda587a21d44fa31a05dd79a8eb40c63ec099785a49801d`. The published -07 source remains frozen; this software patch only aligns existing input checks.
+The structural schema follows the [current Core schema](https://github.com/hjs-spec/jep-core/blob/main/schemas/jep-event.schema.json).
