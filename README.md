@@ -1,83 +1,14 @@
 # JEP Core 0.7 Reference API
 
-FastAPI reference implementation for JEP Core 0.7, with explicit pre-0.7
-compatibility routes.
+HTTP service for creating signed events, verifying them and maintaining acceptance
+state. The service owns the signing key; applications and HTTP clients send requests.
 
-Current protocol profile: `jep-core-0.7`. Wire major remains `jep: "1"`.
+Current profile: `jep-core-0.7`; wire major: `jep: "1"`.
 
-The API deliberately separates current and historical behavior:
-
-| Route | Semantics |
+| Route | Use |
 |---|---|
-| `POST /v0.7/events/create` | Current JEP Core 0.7 event creation |
-| `POST /v0.7/events/verify` | Current 0.7 archival / acceptance verification |
-| `POST /events/create` | Legacy pre-0.7 compatibility creation |
-| `POST /events/verify` | Legacy pre-0.7 compatibility verification |
-| `POST /events/verify-legacy` | Explicit historical-format integrity verification |
-
-No 0.7 failure triggers automatic fallback to a legacy format.
-
-## JEP Core 0.7 behavior
-
-A created 0.7 event contains:
-
-- `jep: "1"`;
-- stable `id`;
-- `verb`, `who`, `when`, and verb-specific `what`;
-- optional `aud`, `ref`, and extensions;
-- `sig`.
-
-Core 0.7 creation does **not** add a mandatory nonce.
-
-Event Identity is `(who,id)`. Event Hash remains the digest of the exact
-signed artifact.
-
-### Acceptance
-
-Acceptance state is keyed by Event Identity.
-
-First acceptance:
-
-```json
-{
-  "status": "valid",
-  "acceptance": {
-    "outcome": "accepted",
-    "effect_applied": true
-  }
-}
-```
-
-Safe retry of the same Event Identity and unsigned content:
-
-```json
-{
-  "status": "valid",
-  "acceptance": {
-    "outcome": "already_accepted",
-    "effect_applied": false
-  }
-}
-```
-
-Reuse of one Event Identity for different unsigned content is rejected with
-`ERR_EVENT_ID_CONFLICT`.
-
-### Validation
-
-0.7 responses report independent checks instead of cumulative Validation
-Levels.
-
-Core checks include:
-
-- `syntax`
-- `cryptographic`
-- `event_identity`
-- `reference_integrity`
-- `extension_processing`
-
-Audience and freshness are optional request/profile checks. Chain and policy
-semantics are not defined by this API as Core behavior.
+| `POST /v0.7/events/create` | Create and sign an event |
+| `POST /v0.7/events/verify` | Verify an event in archival or acceptance mode |
 
 ## Run locally
 
@@ -90,83 +21,86 @@ python -m pip install -r requirements.txt
 python -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/docs`.
+Open [interactive API documentation](http://127.0.0.1:8000/docs).
+Local development stores keys, signed records and acceptance state in `.jep-state`.
 
-The default local configuration persists keys, signed artifacts, legacy nonce
-state, and 0.7 Event Identity acceptance state under `.jep-state`.
+<a id="create-a-07-event"></a>
+<a id="verify-a-07-event"></a>
 
-## Create a 0.7 event
+## Create and verify an event
 
-```json
-{
-  "verb": "J",
-  "who": "did:example:agent-789",
-  "what": {
-    "claim": "approve",
-    "subject": "demo"
-  }
-}
+Keep the API running. Run this Python example in a second terminal; it uses only
+the standard library:
+
+```python
+import json
+from urllib.request import Request, urlopen
+
+base_url = "http://127.0.0.1:8000"
+
+def post(path, payload):
+    request = Request(base_url + path, data=json.dumps(payload).encode(),
+                      headers={"Content-Type": "application/json"}, method="POST")
+    with urlopen(request, timeout=10) as response:
+        return json.load(response)
+
+created = post("/v0.7/events/create", {
+    "verb": "J",
+    "who": "did:example:agent-789",
+    "what": {"claim": "approve", "subject": "demo"},
+})
+verified = post("/v0.7/events/verify", {
+    "event": created["event"],
+    "mode": "archival",
+})
+print(verified["status"], verified["checks"]["cryptographic"])
+print(verified["event_hash"])
 ```
 
-Send to `POST /v0.7/events/create`.
+Expect `valid pass` followed by the Event Hash. The server assigns an `id` unless
+you supply one. For language-specific clients, use the [HTTP Quickstart](https://github.com/hjs-spec/jep-quickstart).
 
-The server assigns an `id` unless one is supplied explicitly.
+<a id="jep-core-07-behavior"></a>
 
-## Verify a 0.7 event
+## Validation
 
-Archival:
+Read `status` (`valid`, `invalid` or `indeterminate`), the individual `checks`,
+and any `errors`. A passing signature verifies integrity under the selected key;
+the caller's claimed identity and authority need application trust policy.
 
-```json
-{
-  "event": { "...": "..." },
-  "mode": "archival"
-}
-```
+`mode: "archival"` verifies without changing acceptance state. Request audience
+or freshness checks explicitly with `expected_audience` or `max_age_seconds`.
 
-Acceptance:
+## Acceptance
 
-```json
-{
-  "event": { "...": "..." },
-  "mode": "acceptance"
-}
-```
+`mode: "acceptance"` also records a decision keyed by Event Identity `(who,id)`.
 
-Optional profile-like checks can be requested with `expected_audience` and
-`max_age_seconds`.
-
-## Legacy compatibility
-
-The old unversioned routes preserve the previous nonce / Validation-Level
-behavior so historical integrations remain reproducible during migration.
-
-They are not the current JEP Core definition.
-
-Historical signed artifacts are never rewritten or re-signed solely to satisfy
-0.7.
+| Request | Outcome |
+|---|---|
+| First valid acceptance | `accepted`, `effect_applied: true` |
+| Same identity and unsigned content again | `already_accepted`, `effect_applied: false` |
+| Same identity with different unsigned content | Rejected with `ERR_EVENT_ID_CONFLICT` |
 
 ## State and multi-host deployment
 
-Local development uses SQLite. Production uses PostgreSQL shared state.
+Use SQLite for local development and shared PostgreSQL state for multiple API
+replicas. [Deployment instructions](DEPLOYMENT.md) cover signing keys,
+authenticated signing/acceptance access, TLS, rotation and database migration.
 
-The 0.7 acceptance table is independent from the legacy nonce table. This is
-intentional:
+## Legacy compatibility
 
-```text
-pre-0.7 replay compatibility -> nonce state
-JEP Core 0.7 acceptance      -> (who,id) acceptance state
-```
+Select these routes only for known historical formats:
 
-Both paths use transactional state updates.
+| Route | Use |
+|---|---|
+| `POST /events/create` | Pre-0.7 compatibility creation |
+| `POST /events/verify` | Pre-0.7 compatibility verification |
+| `POST /events/verify-legacy` | Integrity verification with an explicit historical format |
+
+A failed 0.7 verification never selects a legacy decoder automatically. Preserve
+historical signed bytes; see [historical formats](DEPLOYMENT.md#historical-formats).
 
 ## Protocol resources
 
-- [JEP Core canonical repository](https://github.com/hjs-spec/jep-core)
-- [Published JEP Core draft](https://datatracker.ietf.org/doc/draft-wang-jep-judgment-event-protocol/)
-- [JEP Conformance](https://datatracker.ietf.org/doc/draft-wang-jep-conformance/)
-- [JEP Profiles](https://datatracker.ietf.org/doc/draft-wang-jep-profiles/)
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for operational hardening and `compatibility.py` for
-explicit historical integrity verification.
-
-The structural schema follows the [current Core schema](https://github.com/hjs-spec/jep-core/blob/main/schemas/jep-event.schema.json).
+- [Core contract and specification sources](https://github.com/hjs-spec/jep-core#current-contract)
+- [Current event schema](https://github.com/hjs-spec/jep-core/blob/main/schemas/jep-event.schema.json)
