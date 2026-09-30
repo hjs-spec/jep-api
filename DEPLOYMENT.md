@@ -2,13 +2,13 @@
 
 Current protocol profile: **JEP Core 0.7**, wire major `jep: "1"`. The software version in `VERSION` is independent of the protocol. Current routes are `/v0.7/events/*`; unversioned routes preserve explicit pre-0.7 behavior.
 
-## Hosted-service status — 2026-09-27
+## Self-hosting
 
-Maintainer-operated production hosting is **deferred**, not an installation prerequisite. The dedicated Railway trial resources were removed; the historical Hugging Face Space was not upgraded and must not be advertised as a current production endpoint. Keep local use and self-hosting available. A successful package or container release is not evidence of a live service.
+Start with the [local API](README.md#run-locally). For shared acceptance state,
+deploy the reference container with PostgreSQL, signing keys and authenticated
+signing access as described below. Configure clients with your deployment URL.
 
-`check-hf.yml` is manual and reads configuration metadata only. `deploy.yml` is **manual-only** on `main`, requires confirmation `deploy-hosted-api`, and has no release-completion trigger. A software release does not provision or wake a hosted service. Before deliberately re-enabling hosting, approve its cost, database, networking, signing identity and operational owner. Existing production configuration checks and matching live health/revision checks still apply; never bypass them to make a deployment green.
-
-Source releases, GHCR images, registry downloads and live services are separate delivery results. See the [current delivery status](https://github.com/hjs-spec/.github/blob/main/DELIVERY-CURRENT.md). Historical releases and workflow runs remain unchanged.
+[Released source and containers](https://github.com/hjs-spec/.github/blob/main/DELIVERY-CURRENT.md).
 
 ## Multiple hosts
 
@@ -44,13 +44,3 @@ Public key history is retained in PostgreSQL across rotations, so an old signatu
 Trusted historical public keys must be provisioned in the external keyring (public entries need no `d`). No keys are trusted from an event. The response is archival-only with `legacy_signature_integrity`; it does not assert current baseline conformance, acceptance, actor binding, or business truth. There is no automatic legacy fallback or re-signing. JEP-04 embedded-JWS SDK archives and Claude replay packs continue through their existing named SDK/CLI verifiers; they are not detached-JWS events.
 
 The old HF demo generated a private key at every process start and exposed no public-key export endpoint. Keys already lost on restart cannot be reconstructed. Existing independently retained public keys can be imported; otherwise historical verification returns `ERR_KEY_UNRESOLVED`.
-
-## Optional Hugging Face target (not currently deployed by maintainers)
-
-Existing historical Space: `yuqiangJEP/jep-api`, https://yuqiangjep-jep-api.hf.space. This is not a promise of a current or always-on service. Do not use it as the default client endpoint.
-
-The deployment workflow requires a write-scoped `HF_TOKEN` stored as a GitHub Actions secret and Space secrets configured for external state/keys. It verifies a matching deployed revision after upload. The configured deployment must pass its health probe; merely uploading files is not counted as a successful deployment. A multi-host PostgreSQL/Vault service is not provisioned by the free demo Space itself. Confirm outbound connectivity, storage durability and sleep behavior against the [Space platform constraints](https://huggingface.co/docs/hub/spaces-overview) before selecting this host.
-
-Run the **Check Hugging Face deployment configuration** workflow (`check-hf.yml`) to validate token access and required configuration names without uploading files or restarting the Space. It reads secret metadata only; secret values cannot be read back from the Hub. The same gate runs before every deployment upload and reports missing settings by name. Presence checks do not validate database connectivity or secret contents; startup and the deployed revision health check remain required. Only after hosting has deliberately been approved, run `deploy.yml` at current `main` with `deploy-hosted-api`; rerunning an older job uses its older deployment code and is not the reactivation path.
-
-Future Space configuration: variable `JEP_DEPLOYMENT_MODE=production`; secrets `JEP_DATABASE_URL`, `JEP_KEYRING_JSON`, and `JEP_SIGNING_TOKEN` (or Vault variables and `JEP_VAULT_TOKEN`). The container entrypoint materializes secrets into mode-0600 files without printing them. Keep persistent public-key and replay history in PostgreSQL. No credentials are needed from the owner while maintainer hosting remains deferred.
