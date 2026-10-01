@@ -1,3 +1,11 @@
+# Software 0.8.7
+
+- Supply the MIT license already declared by the deployment metadata; retain BSD-3-Clause notices for the JEP Core schema and fixture copies.
+- Include license texts and scope notices in source releases, container images and the existing deployment bundle.
+- Verify distributed license bytes before publishing artifacts.
+
+Runtime behavior and JEP Core 0.7 semantics are unchanged. Existing published artifacts are not overwritten.
+
 # Software 0.8.6
 
 - Accept the Core 0.7 V string-scope and array-scope forms without rewriting signed events.

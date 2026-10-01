@@ -35,6 +35,7 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m pytest tests -q
       - run: mkdir -p dist && git archive --format=tar.gz --output=dist/jep-api-source.tar.gz HEAD
+      - run: python scripts/check_distribution_licenses.py --source dist/jep-api-source.tar.gz
       - name: Validate release version
         run: |
           python -c "import pathlib,re; v=pathlib.Path('VERSION').read_text().strip(); assert __import__('main').VERSION == v; assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:a[0-9]+)?',v)"
@@ -81,6 +82,12 @@ jobs:
           image="ghcr.io/hjs-spec/jep-api:$RELEASE_VERSION"
           docker run -d --name jep-release-smoke -p 7860:7860 "$image"
           trap 'docker logs jep-release-smoke; docker rm -f jep-release-smoke' EXIT
+          mkdir -p /tmp/jep-release-licenses
+          docker cp jep-release-smoke:/app/LICENSE /tmp/jep-release-licenses/LICENSE
+          docker cp jep-release-smoke:/app/NOTICE.md /tmp/jep-release-licenses/NOTICE.md
+          docker cp jep-release-smoke:/app/licenses /tmp/jep-release-licenses/licenses
+          python scripts/check_distribution_licenses.py --directory /tmp/jep-release-licenses
+          test "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.licenses" }}' "$image")" = 'MIT AND BSD-3-Clause'
           for attempt in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:7860/health > /tmp/health.json; then
               python -c "import json,os; h=json.load(open('/tmp/health.json')); assert h['profile']=='jep-core-0.7'; assert h['version']==os.environ['RELEASE_VERSION']; assert h['revision']==os.environ['GITHUB_SHA']"

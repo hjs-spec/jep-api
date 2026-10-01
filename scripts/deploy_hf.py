@@ -35,7 +35,8 @@ revision=os.environ["JEP_REVISION"]
 version=Path("VERSION").read_text().strip()
 with tempfile.TemporaryDirectory() as directory:
     target=Path(directory)
-    for file in ["VERSION","main.py","state.py","keys.py","compatibility.py","manage.py","requirements.txt","jep-event.schema.json","jep-event-0.7.schema.json","Dockerfile"]:shutil.copyfile(file,target/file)
+    for file in ["LICENSE","NOTICE.md","VERSION","main.py","state.py","keys.py","compatibility.py","manage.py","requirements.txt","jep-event.schema.json","jep-event-0.7.schema.json","Dockerfile"]:shutil.copyfile(file,target/file)
+    shutil.copytree("licenses",target/"licenses")
     (target/"scripts").mkdir();shutil.copyfile("scripts/entrypoint.py",target/"scripts/entrypoint.py")
     docker=(target/"Dockerfile").read_text().replace("ARG JEP_REVISION=unknown",f"ARG JEP_REVISION={revision}")
     (target/"Dockerfile").write_text(docker)

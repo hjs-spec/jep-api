@@ -137,3 +137,8 @@ historical signed bytes; see [historical formats](DEPLOYMENT.md#historical-forma
 - [Core contract and specification sources](https://github.com/hjs-spec/jep-core#current-contract)
 - [Current event schema](https://github.com/hjs-spec/jep-core/blob/main/schemas/jep-event.schema.json)
 - [Contributing and private security reports](https://github.com/hjs-spec/.github/blob/main/CONTRIBUTING.md)
+
+## License
+
+Original code uses [MIT](LICENSE). Schema and Core fixture copies retain
+BSD-3-Clause; see [licensing scope and notices](NOTICE.md).

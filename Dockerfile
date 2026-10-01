@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 WORKDIR /app
+LABEL org.opencontainers.image.licenses="MIT AND BSD-3-Clause"
+COPY LICENSE NOTICE.md ./
+COPY licenses/ ./licenses/
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && useradd --create-home --uid 1000 jep
 COPY --chown=jep:jep VERSION main.py state.py keys.py compatibility.py manage.py jep-event.schema.json jep-event-0.7.schema.json ./
