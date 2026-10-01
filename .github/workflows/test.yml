@@ -27,3 +27,5 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: python -m pytest tests -q
+      - run: git archive --format=tar.gz --output=/tmp/jep-api-source.tar.gz HEAD
+      - run: python scripts/check_distribution_licenses.py --source /tmp/jep-api-source.tar.gz
