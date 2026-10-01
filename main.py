@@ -33,7 +33,7 @@ import time
 import uuid
 from copy import deepcopy
 from pathlib import Path
-from state import configured_state
+from state import CreationConflict, configured_state
 from keys import KeyManager, KeyUnavailable, InvalidPublicKey, verification_key
 from nacl.signing import VerifyKey
 import psycopg
@@ -258,7 +258,10 @@ class VerifyEventRequest(BaseModel):
 
 
 class CreateEvent07Request(BaseModel):
-    id: Optional[str] = Field(default=None, min_length=1)
+    id: Optional[str] = Field(
+        default=None, min_length=1,
+        description="Caller-chosen ID. Reuse with an unchanged request to recover its original creation response (API 0.8.6+). Omit to create a new event each time.",
+    )
     verb: str = Field(..., pattern="^(J|D|T|V)$")
     who: str = Field(default=DEMO_WHO, min_length=1)
     what: Any
@@ -567,6 +570,22 @@ def validate_event_07(
 
 @app.post("/v0.7/events/create", response_model=EventResponse)
 def create_event_07(req: CreateEvent07Request) -> Dict[str, Any]:
+    request_key = request_digest = None
+    if req.id is not None:
+        try:
+            # Hash the caller identity rather than storing plaintext who in the
+            # retry ledger, including when digest_only_who is requested.
+            request_key = sha256_digest(jcs_seed({"who": req.who, "id": req.id}))
+            request_digest = sha256_digest(jcs_seed(req.model_dump()))
+            previous = STATE.created_response(request_key, request_digest)
+            if previous is not None:
+                return previous
+        except CreationConflict as exc:
+            raise HTTPException(status_code=409, detail={"code": "ERR_CREATE_REQUEST_CONFLICT", "message": str(exc)}) from exc
+        except STORAGE_ERRORS as exc:
+            raise HTTPException(status_code=503, detail="Creation state is unavailable") from exc
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     now = int(time.time())
     who = req.who
     ext = deepcopy(req.ext or {})
@@ -615,11 +634,16 @@ def create_event_07(req: CreateEvent07Request) -> Dict[str, Any]:
     if result["status"] != "valid":
         raise HTTPException(status_code=422, detail=result)
     h = event_hash(event)
+    response = {"event": event, "event_hash": h, "validation": result}
     try:
+        if request_key is not None:
+            return STATE.save_created_response(request_key, request_digest, response)
         STATE.save_event(h, event)
+    except CreationConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": "ERR_CREATE_REQUEST_CONFLICT", "message": str(exc)}) from exc
     except STORAGE_ERRORS as exc:
         raise HTTPException(status_code=503, detail="Event storage is unavailable") from exc
-    return {"event": event, "event_hash": h, "validation": result}
+    return response
 
 
 @app.post("/v0.7/events/verify")

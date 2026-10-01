@@ -1,3 +1,12 @@
+# Software 0.8.6
+
+- Accept the Core 0.7 V string-scope and array-scope forms without rewriting signed events.
+- Recover creation requests with an explicit caller `id`: the same `who`, `id` and request return the original complete response. Different request content returns HTTP 409 `ERR_CREATE_REQUEST_CONFLICT`.
+- Commit the event and recovery response together in SQLite or PostgreSQL; preserve recovery records during database migration and across API restarts and signing-key rotation.
+- Document creation and acceptance retries, failure handling and the upgrade boundary. This applies to requests first processed by 0.8.6+; older lost responses cannot be reconstructed.
+
+Creation still does not consume acceptance state or perform a business action. The protocol remains JEP Core 0.7; published drafts and historical signed bytes are unchanged.
+
 # Software 0.8.5
 
 Current Core 0.7 verification now rejects empty extension identifiers and digest
