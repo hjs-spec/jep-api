@@ -30,6 +30,17 @@ def migrate(directory,dsn):
             db.execute("INSERT INTO jep_nonces VALUES (%s,%s,%s,%s) ON CONFLICT(actor,audience,nonce) DO UPDATE SET expires=GREATEST(jep_nonces.expires,EXCLUDED.expires)",(actor,audience,nonce,expires))
         for h,payload in old.execute("SELECT hash,payload FROM events"):
             db.execute("INSERT INTO jep_events VALUES (%s,%s::jsonb) ON CONFLICT DO NOTHING",(h,payload))
+        if "created_requests" in tables:
+            for key,digest,response in old.execute("SELECT request_key,request_digest,response FROM created_requests"):
+                db.execute(
+                    "INSERT INTO jep_created_requests VALUES (%s,%s,%s::jsonb) ON CONFLICT(request_key) DO NOTHING",
+                    (key,digest,response),
+                )
+                existing=db.execute(
+                    "SELECT request_digest,response FROM jep_created_requests WHERE request_key=%s",(key,)
+                ).fetchone()
+                if existing is None or existing[0]!=digest or existing[1]!=json.loads(response):
+                    raise ValueError("Creation response conflict; migration rolled back")
         if "accepted_events" in tables:
             for actor,event_id,digest,event_hash,accepted_at in old.execute(
                 "SELECT actor,event_id,payload_digest,event_hash,accepted_at FROM accepted_events"

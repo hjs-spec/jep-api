@@ -10,6 +10,18 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
 
+class CreationConflict(ValueError):
+    """A stable creation identity was used with a different request."""
+
+
+def creation_response(row, request_digest):
+    if row is None:
+        return None
+    if row[0] != request_digest:
+        raise CreationConflict("Creation identity is already bound to a different request")
+    return json.loads(row[1]) if isinstance(row[1], str) else row[1]
+
+
 class LocalState:
     def __init__(self, directory: str | Path):
         self.directory = Path(directory).resolve()
@@ -22,6 +34,11 @@ class LocalState:
                     actor TEXT NOT NULL, audience TEXT NOT NULL, nonce TEXT NOT NULL, expires INTEGER NOT NULL,
                     PRIMARY KEY (actor, audience, nonce));
                 CREATE TABLE IF NOT EXISTS events (hash TEXT PRIMARY KEY, payload TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS created_requests (
+                    request_key TEXT PRIMARY KEY,
+                    request_digest TEXT NOT NULL,
+                    response TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS accepted_events (
                     actor TEXT NOT NULL,
                     event_id TEXT NOT NULL,
@@ -102,6 +119,35 @@ class LocalState:
                 (event_hash, json.dumps(event, ensure_ascii=False)),
             )
 
+    def created_response(self, request_key: str, request_digest: str):
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT request_digest,response FROM created_requests WHERE request_key=?",
+                (request_key,),
+            ).fetchone()
+            return creation_response(row, request_digest)
+
+    def save_created_response(self, request_key: str, request_digest: str, response: dict):
+        """Commit the original response and signed event together; concurrent retries reuse it."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT request_digest,response FROM created_requests WHERE request_key=?",
+                (request_key,),
+            ).fetchone()
+            previous = creation_response(row, request_digest)
+            if previous is not None:
+                return previous
+            db.execute(
+                "INSERT INTO events(hash,payload) VALUES (?,?) ON CONFLICT(hash) DO NOTHING",
+                (response["event_hash"], json.dumps(response["event"], ensure_ascii=False)),
+            )
+            db.execute(
+                "INSERT INTO created_requests(request_key,request_digest,response) VALUES (?,?,?)",
+                (request_key, request_digest, json.dumps(response, ensure_ascii=False)),
+            )
+        return response
+
     def register_public_key(self, kid: str, jwk: dict) -> None:
         payload = json.dumps(jwk, sort_keys=True)
         with self.connect() as db:
@@ -132,6 +178,7 @@ class PostgresState:
             db.execute("SELECT pg_advisory_xact_lock(7060601)")
             db.execute("CREATE TABLE IF NOT EXISTS jep_nonces (actor TEXT NOT NULL, audience TEXT NOT NULL, nonce TEXT NOT NULL, expires BIGINT NOT NULL, PRIMARY KEY(actor,audience,nonce))")
             db.execute("CREATE TABLE IF NOT EXISTS jep_events (hash TEXT PRIMARY KEY, payload JSONB NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS jep_created_requests (request_key TEXT PRIMARY KEY, request_digest TEXT NOT NULL, response JSONB NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS jep_public_keys (kid TEXT PRIMARY KEY, payload JSONB NOT NULL)")
             db.execute("""CREATE TABLE IF NOT EXISTS jep_accepted_events (
                 actor TEXT NOT NULL,
@@ -178,6 +225,37 @@ class PostgresState:
     def save_event(self, event_hash: str, event: dict) -> None:
         with self.connect() as db:
             db.execute("INSERT INTO jep_events VALUES (%s,%s::jsonb) ON CONFLICT DO NOTHING", (event_hash,json.dumps(event,ensure_ascii=False)))
+
+    def created_response(self, request_key: str, request_digest: str):
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT request_digest,response FROM jep_created_requests WHERE request_key=%s",
+                (request_key,),
+            ).fetchone()
+            return creation_response(row, request_digest)
+
+    def save_created_response(self, request_key: str, request_digest: str, response: dict):
+        with self.connect() as db:
+            row = db.execute(
+                """INSERT INTO jep_created_requests(request_key,request_digest,response)
+                   VALUES (%s,%s,%s::jsonb) ON CONFLICT(request_key) DO NOTHING
+                   RETURNING request_key""",
+                (request_key, request_digest, json.dumps(response, ensure_ascii=False)),
+            ).fetchone()
+            if row is None:
+                existing = db.execute(
+                    "SELECT request_digest,response FROM jep_created_requests WHERE request_key=%s",
+                    (request_key,),
+                ).fetchone()
+                previous = creation_response(existing, request_digest)
+                if previous is None:
+                    raise self.driver.Error("Creation record disappeared during transaction")
+                return previous
+            db.execute(
+                "INSERT INTO jep_events(hash,payload) VALUES (%s,%s::jsonb) ON CONFLICT(hash) DO NOTHING",
+                (response["event_hash"], json.dumps(response["event"], ensure_ascii=False)),
+            )
+        return response
 
     def register_public_key(self, kid: str, jwk: dict) -> None:
         with self.connect() as db:

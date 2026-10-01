@@ -35,6 +35,7 @@ the standard library:
 ```python
 import json
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 base_url = "http://127.0.0.1:8000"
 
@@ -44,11 +45,13 @@ def post(path, payload):
     with urlopen(request, timeout=10) as response:
         return json.load(response)
 
-created = post("/v0.7/events/create", {
+create_request = {
+    "id": "urn:uuid:" + str(uuid4()),
     "verb": "J",
     "who": "did:example:agent-789",
     "what": {"claim": "approve", "subject": "demo"},
-})
+}
+created = post("/v0.7/events/create", create_request)
 verified = post("/v0.7/events/verify", {
     "event": created["event"],
     "mode": "archival",
@@ -59,6 +62,25 @@ print(verified["event_hash"])
 
 Expect `valid pass` followed by the Event Hash. The server assigns an `id` unless
 you supply one. For language-specific clients, use the [HTTP Quickstart](https://github.com/hjs-spec/jep-quickstart).
+
+## Recover a creation request
+
+With API **0.8.6+**, choose an `id` once per logical operation and retain the
+complete request before sending it. After a timeout or HTTP 503, resend that
+unchanged request to the same deployment. It returns the original event,
+signature, Event Hash and creation-time validation result, even after a restart
+or signing-key rotation. It does not renew the timestamp or expiry; verify again
+when you need current freshness or acceptance checks.
+
+The same caller `who` and `id` with different request content returns HTTP 409
+with `detail.code: ERR_CREATE_REQUEST_CONFLICT`. Stop and reconcile the original
+request; changing the `id` would create a separate event. Without a caller-supplied
+`id`, each successful creation is new. Requests first processed by an older API
+cannot be recovered through this mechanism; retain any original signed event.
+
+This recovery depends on preserving the database. Creation records and events
+are saved together in SQLite or PostgreSQL; creating an event does not accept it
+or execute an application action.
 
 <a id="jep-core-07-behavior"></a>
 
@@ -80,6 +102,16 @@ or freshness checks explicitly with `expected_audience` or `max_age_seconds`.
 | First valid acceptance | `accepted`, `effect_applied: true` |
 | Same identity and unsigned content again | `already_accepted`, `effect_applied: false` |
 | Same identity with different unsigned content | Rejected with `ERR_EVENT_ID_CONFLICT` |
+
+After an acceptance response is lost, resend the **original signed event**.
+An `already_accepted` result confirms the stored acceptance decision; it does not
+prove that your separate business action completed. Reconcile that action in
+your application before retrying it.
+
+For a failed signature, stop and check the original bytes and selected trusted
+key. For `ERR_KEY_UNRESOLVED`, obtain trusted verification material before
+continuing. For `ERR_ACCEPTANCE_STATE_UNAVAILABLE`, retry the same event after
+storage recovers; do not treat an indeterminate result as acceptance.
 
 ## State and multi-host deployment
 
@@ -104,3 +136,4 @@ historical signed bytes; see [historical formats](DEPLOYMENT.md#historical-forma
 
 - [Core contract and specification sources](https://github.com/hjs-spec/jep-core#current-contract)
 - [Current event schema](https://github.com/hjs-spec/jep-core/blob/main/schemas/jep-event.schema.json)
+- [Contributing and private security reports](https://github.com/hjs-spec/.github/blob/main/CONTRIBUTING.md)

@@ -50,7 +50,7 @@ def test_vault_pins_version_and_verifies_signature(tmp_path,monkeypatch):
 @pytest.mark.skipif(not os.environ.get("JEP_TEST_DATABASE_URL"),reason="CI supplies real PostgreSQL")
 def test_postgres_independent_apis(tmp_path):
     dsn=os.environ["JEP_TEST_DATABASE_URL"];state=PostgresState(dsn)
-    with state.connect() as db:db.execute("TRUNCATE jep_nonces,jep_events,jep_public_keys")
+    with state.connect() as db:db.execute("TRUNCATE jep_nonces,jep_events,jep_public_keys,jep_created_requests,jep_accepted_events")
     paths=[tmp_path/"one.json",tmp_path/"two.json"];keyring(paths[0]);paths[1].write_text(paths[0].read_text());paths[1].chmod(0o600)
     token=tmp_path/"auth";token.write_text("test-only-bearer");procs=[];urls=[];logs=[]
     try:
@@ -72,13 +72,26 @@ def test_postgres_independent_apis(tmp_path):
             def consume(i):return client.post(urls[i%2]+"/events/verify",json={"event":event,"mode":"acceptance","expected_audience":"test"},headers=headers).json()
             with ThreadPoolExecutor(8) as pool:results=list(pool.map(consume,range(16)))
             assert sum(r["valid"] for r in results)==1,results
+            current_request={**request,"id":"postgres-stable-create"}
+            def create_current(i):
+                response=client.post(urls[i%2]+"/v0.7/events/create",json=current_request,headers=headers)
+                assert response.status_code==200,response.text
+                return response.json()
+            with ThreadPoolExecutor(8) as pool:created_current=list(pool.map(create_current,range(16)))
+            assert all(item==created_current[0] for item in created_current)
+            conflict=client.post(urls[1]+"/v0.7/events/create",json={**current_request,"what":{"claim":"other"}},headers=headers)
+            assert conflict.status_code==409
+            assert conflict.json()["detail"]["code"]=="ERR_CREATE_REQUEST_CONFLICT"
             keyring(paths[0],"key-2");paths[1].write_text(paths[0].read_text());paths[1].chmod(0o600)
             new=client.post(urls[0]+"/events/create",json=request,headers=headers);assert new.status_code==200,new.text
             for url in urls:
+                assert client.post(url+"/v0.7/events/create",json=current_request,headers=headers).json()==created_current[0]
+                assert client.post(url+"/v0.7/events/create",json=current_request).status_code==401
                 assert client.post(url+"/events/verify",json={"event":event}).json()["valid"]
                 assert client.post(url+"/events/verify",json={"event":new.json()["event"]}).json()["valid"]
         with state.connect() as db:
-            assert db.execute("SELECT count(*) FROM jep_events").fetchone()[0]==2
+            assert db.execute("SELECT count(*) FROM jep_events").fetchone()[0]==3
+            assert db.execute("SELECT count(*) FROM jep_created_requests").fetchone()[0]==1
             assert db.execute("SELECT count(*) FROM jep_public_keys").fetchone()[0]==2
     finally:
         for p in procs:p.terminate()

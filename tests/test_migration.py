@@ -64,8 +64,36 @@ def test_pre07_database_without_acceptance_table_still_migrates(tmp_path):
     source, actor = source_state(tmp_path)
     with source.connect() as db:
         db.execute("DROP TABLE accepted_events")
+        db.execute("DROP TABLE created_requests")
     dsn = os.environ["JEP_TEST_DATABASE_URL"]
     migrate(source.directory, dsn)
     target = PostgresState(dsn)
     assert not target.consume_nonce(actor, "receiver", "legacy-nonce", now=20, expires=120)
     assert target.accept_event_identity(actor, "new-event", "digest", "hash", now=20) == "accepted"
+
+
+def test_creation_responses_survive_migration_and_retry(tmp_path):
+    source, actor = source_state(tmp_path)
+    response = {"event": {"id": actor, "what": {"claim": "original"}}, "event_hash": actor + ":created", "validation": {"status": "valid"}}
+    source.save_created_response(actor, "request-digest", response)
+    dsn = os.environ["JEP_TEST_DATABASE_URL"]
+    migrate(source.directory, dsn)
+    migrate(source.directory, dsn)
+    target = PostgresState(dsn)
+    assert target.created_response(actor, "request-digest") == response
+    assert target.save_created_response(actor, "request-digest", {**response, "event_hash": "new-candidate"}) == response
+    with pytest.raises(ValueError, match="different request"):
+        target.created_response(actor, "conflicting-request")
+
+
+def test_creation_response_conflict_rolls_back_migration(tmp_path):
+    source, actor = source_state(tmp_path)
+    response = {"event": {"id": actor}, "event_hash": actor + ":created"}
+    source.save_created_response(actor, "request-digest", response)
+    dsn = os.environ["JEP_TEST_DATABASE_URL"]
+    target = PostgresState(dsn)
+    target.save_created_response(actor, "request-digest", {**response, "event_hash": actor + ":different"})
+    with pytest.raises(ValueError, match="Creation response conflict"):
+        migrate(source.directory, dsn)
+    with target.connect() as db:
+        assert db.execute("SELECT hash FROM jep_events WHERE hash=%s", (actor,)).fetchone() is None

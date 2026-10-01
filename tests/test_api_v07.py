@@ -59,7 +59,8 @@ def test_07_acceptance_is_idempotent():
 def test_07_identity_conflict_is_rejected():
     event_id = "urn:uuid:00000000-0000-7000-8000-000000000777"
     first = create(id=event_id, what={"claim": "approve"})["event"]
-    conflicting = create(id=event_id, what={"claim": "reject"})["event"]
+    conflicting = {**first, "what": {"claim": "reject"}}
+    conflicting["sig"] = main.detached_jws_sign({k: v for k, v in conflicting.items() if k != "sig"})
 
     accepted = client.post("/v0.7/events/verify", json={"event": first, "mode": "acceptance"}).json()
     conflict = client.post("/v0.7/events/verify", json={"event": conflicting, "mode": "acceptance"}).json()

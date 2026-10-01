@@ -31,8 +31,14 @@ Public key history is retained in PostgreSQL across rotations, so an old signatu
 
 1. Pause API writes and acceptance consumers. Back up the complete existing state directory.
 2. Run `python manage.py export-key /existing/state /private/keyring.json` to retain the current signing identity. This refuses to overwrite files or invent a missing historical key.
-3. Run `python manage.py migrate-postgres /existing/state --database-url-file /private/database-url`. It copies events, trusted public keys, legacy nonce expiries and Core 0.7 Event Identity acceptance records transactionally. It preserves nonce expiries and prior acceptance decisions on retry. A conflicting accepted identity aborts and rolls back the import; resolve the conflict before switching traffic. Historical databases without a 0.7 acceptance table remain supported. Private keys never enter PostgreSQL.
-4. Configure PostgreSQL, keyring and signing authentication on the replicas. Check health, an archived signature, `already_accepted` for a previously accepted 0.7 event, identity-conflict rejection and rejection of a previously consumed legacy nonce before reopening traffic. Do not fall back to the old SQLite snapshot after PostgreSQL accepts new events.
+3. Run `python manage.py migrate-postgres /existing/state --database-url-file /private/database-url`. It copies events, creation responses, trusted public keys, legacy nonce expiries and Core 0.7 Event Identity acceptance records transactionally. It preserves original creation responses, nonce expiries and prior acceptance decisions on retry. A conflicting creation response or accepted identity aborts and rolls back the import; resolve the conflict before switching traffic. Historical databases without these newer tables remain supported. Private keys never enter PostgreSQL.
+4. Configure PostgreSQL, keyring and signing authentication on the replicas. Check health, an archived signature, an unchanged creation retry, `already_accepted` for a previously accepted 0.7 event, identity-conflict rejection and rejection of a previously consumed legacy nonce before reopening traffic. Do not fall back to the old SQLite snapshot after PostgreSQL accepts new events.
+
+For creation recovery, upgrade all replicas to 0.8.6+ before allowing clients to
+retry by `id`; mixed deployments can route a retry to an older creator. Keep the
+creation-response table in database backups for as long as callers may retry.
+Migration preserves existing records but cannot reconstruct responses lost before
+0.8.6. See [creation recovery](README.md#recover-a-creation-request).
 
 ## Historical formats
 
